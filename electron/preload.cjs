@@ -11,6 +11,11 @@ contextBridge.exposeInMainWorld('spider', {
     [...files].map((file) => webUtils.getPathForFile(file)).filter(Boolean)
   ),
   openService: (service, query) => invoke('service:open', service, query),
+  vlcInfo: () => invoke('media:vlc-info'),
+  playWithVlc: (url, options) => invoke('media:vlc-play', url, options || {}),
+  loadIptvPlaylist: (url) => invoke('iptv:load', url),
+  searchRadioDirectory: (options) => invoke('radio:directory-search', options || {}),
+  portableDjInfo: () => invoke('dj:portable-info'),
   openBluetooth: () => invoke('devices:open-bluetooth'),
   startNearby: () => invoke('nearby:start'),
   stopNearby: () => invoke('nearby:stop'),

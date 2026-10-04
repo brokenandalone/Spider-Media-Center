@@ -158,7 +158,10 @@ const state = {
     musicDuckLevel: 0.3,
     crossfadeDuration: 4,
     pendingBreak: null,
-    endingNotifiedFor: ''
+    endingNotifiedFor: '',
+    duckingActive: false,
+    activeDuckLevel: 0.3,
+    liveBreakActive: false
   },
   radio: {
     active: false,
@@ -424,8 +427,11 @@ function playable(item) {
 
 function applyDeckVolume(deck, gain = Number(deck.dataset.gain || 1)) {
   deck.dataset.gain = String(gain);
-  const duckFactor = state.djMic.duckingActive ? 10 ** (-state.djMic.duckDb / 20) : 1;
-  deck.volume = Math.max(0, Math.min(1, state.masterVolume * gain * duckFactor));
+  const micDuckFactor = state.djMic.duckingActive ? 10 ** (-state.djMic.duckDb / 20) : 1;
+  const aiDjDuckFactor = state.aiDj.duckingActive
+    ? Math.max(0.05, Math.min(1, Number(state.aiDj.activeDuckLevel) || state.aiDj.musicDuckLevel || 0.3))
+    : 1;
+  deck.volume = Math.max(0, Math.min(1, state.masterVolume * gain * micDuckFactor * aiDjDuckFactor));
   deck.muted = state.muted || state.panicMuted;
 }
 
@@ -1575,6 +1581,26 @@ function prepareDeck(deck, item) {
         state.aiDj.endingNotifiedFor = item.id;
         emitPlayerEvent('trackEnding', { currentTrack: toAIDJTrack(item, deck), nextTrack: nextAIDJTrack(), secondsRemaining: remaining });
       }
+
+      const pending = state.aiDj.pendingBreak;
+      const talkOverAt = Math.max(
+        2,
+        Number(pending?.talkOver?.startSecondsBeforeEnd) || Math.min(8, Math.max(3, state.aiDj.crossfadeDuration + 2))
+      );
+
+      if (
+        pending &&
+        state.repeat !== 'one' &&
+        !state.aiDj.liveBreakActive &&
+        Number.isFinite(remaining) &&
+        remaining <= talkOverAt
+      ) {
+        state.aiDj.pendingBreak = null;
+        state.aiDj.liveBreakActive = true;
+        void playDJBreak(pending).finally(() => {
+          state.aiDj.liveBreakActive = false;
+        });
+      }
     });
     deck.addEventListener('pause', () => emitPlayerEvent('playbackPaused', { currentTrack: toAIDJTrack(currentItem(), deck) }));
     deck.addEventListener('play', () => emitPlayerEvent('playbackResumed', { currentTrack: toAIDJTrack(currentItem(), deck) }));
@@ -1603,6 +1629,16 @@ async function playDJBreak(breakItem) {
   if (typeof source !== 'function') return;
   const url = normalizeDJAudioUrl(breakItem.audioFile);
   if (!url) return;
+
+  const duckLevel = Math.max(
+    0.05,
+    Math.min(1, Number(breakItem?.talkOver?.duckLevel) || state.aiDj.musicDuckLevel || 0.3)
+  );
+
+  state.aiDj.duckingActive = true;
+  state.aiDj.activeDuckLevel = duckLevel;
+  decks.forEach((deck) => applyDeckVolume(deck));
+
   try {
     const audioSource = await source.call(window.__spiderAudioEngine, url, 0, { volume: state.aiDj.voiceVolume });
     const duration = Number(audioSource?.buffer?.duration) || 12;
@@ -1614,6 +1650,9 @@ async function playDJBreak(breakItem) {
     });
   } catch (error) {
     console.warn('AI DJ break failed; continuing music', error);
+  } finally {
+    state.aiDj.duckingActive = false;
+    decks.forEach((deck) => applyDeckVolume(deck));
   }
 }
 
@@ -1900,7 +1939,8 @@ window.__spiderPlayerEngine = {
       id: payload.id || `dj-break-${Date.now()}`,
       audioFile,
       script: String(payload.script || ''),
-      type: payload.type || 'transition'
+      type: payload.type || 'transition',
+      talkOver: payload.talkOver || window.__spiderLastDjTalkOver || null
     };
     return { ok: true, id: state.aiDj.pendingBreak.id };
   },

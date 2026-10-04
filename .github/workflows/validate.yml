@@ -20,7 +20,6 @@ jobs:
           node --check electron/main.cjs
           node --check electron/preload.cjs
           node --check electron/renderer.js
-          node --check electron/vlc-engine.cjs
           node --check electron/network-directory.cjs
           node --check electron/usb-dj.cjs
           node --check dist/media-center-upgrades.js

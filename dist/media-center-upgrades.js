@@ -134,6 +134,106 @@
     visible.forEach((item) => container.append(stationCard(item, kind)));
   }
 
+
+  function getLiveRadioState() {
+    try {
+      const radio = window.__spiderPlayerBridge?.getRadioState?.() || {};
+      return {
+        ...radio,
+        active: Boolean(radio.active || radio.publicUrl || radio.qrDataUrl)
+      };
+    } catch {
+      return { active: false };
+    }
+  }
+
+  function ensureAutoDjControl() {
+    const actions = document.querySelector('.dj-center-actions');
+    const dj = window.__spiderAutoDJ;
+    const bridge = window.__spiderPlayerBridge;
+    if (!actions || !dj || !bridge) return;
+
+    let button = document.getElementById('bcnAutoDjButton');
+    if (!button) {
+      button = el('button', {
+        id: 'bcnAutoDjButton',
+        type: 'button',
+        className: 'ghost-button'
+      });
+
+      button.addEventListener('click', () => {
+        try {
+          if (dj.isRunning()) {
+            dj.stop();
+            ensureAutoDjControl();
+            return;
+          }
+
+          let playlist = dj.listPlaylists().find((item) => item?.tracks?.length);
+          if (!playlist) {
+            const queue = bridge.getQueueSnapshot?.()?.queue || [];
+            if (!queue.length) {
+              alert('AutoDJ needs at least one track in the current queue.');
+              return;
+            }
+
+            playlist = dj.createPlaylist('BCN Auto Queue');
+            dj.savePlaylist({
+              ...playlist,
+              tracks: queue.map((item) => ({
+                ...item,
+                weight: 1,
+                kind: item.kind || 'music'
+              }))
+            });
+          }
+
+          dj.start(playlist.id);
+          ensureAutoDjControl();
+        } catch (error) {
+          alert(`AutoDJ could not start: ${error?.message || error}`);
+        }
+      });
+
+      actions.insertBefore(button, actions.children[1] || null);
+    }
+
+    button.textContent = dj.isRunning() ? 'Stop AutoDJ' : 'Start AutoDJ';
+  }
+
+  function syncConnectionCard() {
+    const radio = getLiveRadioState();
+    const cards = [...document.querySelectorAll('.broadcast-status .status-card')];
+    const card = cards.find((node) => node.querySelector('label')?.textContent?.trim().toLowerCase() === 'connection');
+    if (!card) return;
+
+    const value = card.querySelector('div');
+    if (value) value.textContent = radio.active ? 'live' : 'offline';
+  }
+
+  function wireRadioDiagnostics() {
+    const bridge = window.__spiderPlayerBridge;
+    if (!bridge || bridge.__bcnRadioDiagnostics || typeof bridge.startRadio !== 'function') return;
+
+    const originalStart = bridge.startRadio.bind(bridge);
+    bridge.startRadio = async (...args) => {
+      try {
+        return await originalStart(...args);
+      } catch (error) {
+        alert(`BCN could not go live: ${error?.message || error}`);
+        throw error;
+      }
+    };
+
+    bridge.__bcnRadioDiagnostics = true;
+  }
+
+  function syncBcnControls() {
+    ensureAutoDjControl();
+    syncConnectionCard();
+    wireRadioDiagnostics();
+  }
+
   function buildPanel() {
     if (document.getElementById('bcnMediaLauncher')) return;
 
@@ -324,6 +424,8 @@
   const boot = () => {
     buildPanel();
     replaceBranding(document.getElementById('root'));
+    syncBcnControls();
+    window.setInterval(syncBcnControls, 500);
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
@@ -332,6 +434,7 @@
   const observer = new MutationObserver(() => {
     buildPanel();
     replaceBranding(document.getElementById('root'));
+    syncBcnControls();
   });
 
   const root = document.getElementById('root');

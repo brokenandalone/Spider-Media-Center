@@ -2544,7 +2544,7 @@ window.__spiderPlayerEngine = {
   });
     return { publicUrl: '', listenerCount: 0, active: false };
   },
-  getRadioState: () => ({ active: state.radio.active, publicUrl: state.radio.publicUrl, listenerCount: state.radio.listenerCount })
+  getRadioState: getRadioStateSnapshot
 };
 
 // Dynamically load the small external bridge which exposes the stable

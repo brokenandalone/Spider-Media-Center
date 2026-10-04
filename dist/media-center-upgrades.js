@@ -423,9 +423,6 @@
   }
 
   function ensureTalkToSpiderControl() {
-    const voice = document.querySelector('.voice-assistant');
-    if (!voice) return;
-
     let button = document.getElementById('talkToSpiderLauncher');
     if (!button) {
       button = el('button', {
@@ -433,32 +430,46 @@
         type: 'button',
         text: 'TALK TO SPIDER'
       });
+
       button.addEventListener('click', () => {
+        const voice = document.querySelector('.voice-assistant, [aria-label="Talk to Spider"]');
+        if (!voice) {
+          alert('Talk to Spider is not ready yet. Give Spider Media Center a moment to finish loading.');
+          return;
+        }
+
         const opening = !voice.classList.contains('spider-voice-open');
         voice.classList.toggle('spider-voice-open', opening);
         button.textContent = opening ? 'CLOSE SPIDER VOICE' : 'TALK TO SPIDER';
+
         if (opening) {
           window.setTimeout(() => voice.querySelector('input')?.focus(), 50);
         }
       });
+
       document.body.append(button);
     }
   }
 
   function ensureFloatingAutoDjControl() {
-    const dj = window.__spiderAutoDJ;
-    const bridge = window.__spiderPlayerBridge;
-    if (!dj || !bridge) return;
-
     let button = document.getElementById('floatingAutoDjButton');
     if (!button) {
       button = el('button', {
         id: 'floatingAutoDjButton',
-        type: 'button'
+        type: 'button',
+        text: 'START AUTO DJ'
       });
 
       button.addEventListener('click', () => {
         try {
+          const dj = window.__spiderAutoDJ;
+          const bridge = window.__spiderPlayerBridge;
+
+          if (!dj || !bridge) {
+            alert('AutoDJ is not ready yet. Give Spider Media Center a moment to finish loading.');
+            return;
+          }
+
           if (dj.isRunning()) {
             dj.stop();
           } else {
@@ -469,6 +480,7 @@
                 alert('AutoDJ needs at least one track in the current queue.');
                 return;
               }
+
               playlist = dj.createPlaylist('BCN Auto Queue');
               dj.savePlaylist({
                 ...playlist,
@@ -479,8 +491,10 @@
                 }))
               });
             }
+
             dj.start(playlist.id);
           }
+
           button.textContent = dj.isRunning() ? 'STOP AUTO DJ' : 'START AUTO DJ';
         } catch (error) {
           alert(`AutoDJ could not start: ${error?.message || error}`);
@@ -490,7 +504,8 @@
       document.body.append(button);
     }
 
-    const label = dj.isRunning() ? 'STOP AUTO DJ' : 'START AUTO DJ';
+    const dj = window.__spiderAutoDJ;
+    const label = dj?.isRunning?.() ? 'STOP AUTO DJ' : 'START AUTO DJ';
     if (button.textContent !== label) button.textContent = label;
   }
 

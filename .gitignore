@@ -1,0 +1,5 @@
+node_modules/
+*.asar
+*.zip
+*.log
+.DS_Store

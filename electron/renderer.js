@@ -1,0 +1,3746 @@
+// Simple DOM selector helper. No deferred proxy — when a selector is
+// missing, callers must guard against `null`/`undefined` explicitly.
+const $ = (selector) => document.querySelector(selector);
+
+const PLAYER_EVENTS = ['trackStarted', 'trackEnding', 'trackEnded', 'trackChanged', 'queueChanged', 'playbackPaused', 'playbackResumed'];
+const playerEventListeners = new Map(PLAYER_EVENTS.map((name) => [name, new Set()]));
+function onPlayerEvent(eventName, callback) {
+  const listeners = playerEventListeners.get(eventName);
+  if (!listeners || typeof callback !== 'function') return () => {};
+  listeners.add(callback);
+  return () => listeners.delete(callback);
+}
+function emitPlayerEvent(eventName, payload) {
+  playerEventListeners.get(eventName)?.forEach((callback) => {
+    try { callback(payload); } catch (error) { console.warn(`Spider player event: ${eventName}`, error); }
+  });
+}
+function toAIDJTrack(item, deck = null) {
+  if (!item) return null;
+  const duration = deck && Number.isFinite(deck.duration) ? deck.duration : Number(item.duration) || 0;
+  const currentTime = deck && Number.isFinite(deck.currentTime) ? deck.currentTime : 0;
+  return {
+    id: item.id || '',
+    title: item.title || '',
+    artist: item.artist || '',
+    album: item.album || '',
+    duration,
+    currentTime,
+    remainingTime: Math.max(0, duration - currentTime),
+    paused: Boolean(deck?.paused ?? true),
+    url: item.url || null
+  };
+}
+function nextAIDJTrack() {
+  const index = nextIndex(1);
+  return index >= 0 ? toAIDJTrack(state.queue[index]) : null;
+}
+
+// Wire Media Session action handlers to the bridge and listen for
+// platform media-key IPC events from the main process.
+try {
+  if ('mediaSession' in navigator) {
+    try { navigator.mediaSession.setActionHandler('play', () => window.__spiderPlayerBridge?.togglePlay?.()); } catch {}
+    try { navigator.mediaSession.setActionHandler('pause', () => window.__spiderPlayerBridge?.togglePlay?.()); } catch {}
+    try { navigator.mediaSession.setActionHandler('previoustrack', () => window.__spiderPlayerBridge?.previous?.()); } catch {}
+    try { navigator.mediaSession.setActionHandler('nexttrack', () => window.__spiderPlayerBridge?.next?.()); } catch {}
+    try { navigator.mediaSession.setActionHandler('seekbackward', (details) => window.__spiderPlayerBridge?.back?.((details && details.seekOffset) || 10)); } catch {}
+    try { navigator.mediaSession.setActionHandler('seekforward', (details) => window.__spiderPlayerBridge?.forward?.((details && details.seekOffset) || 10)); } catch {}
+    try { navigator.mediaSession.setActionHandler('seekto', (details) => {
+      if (details && typeof details.seekTime === 'number') {
+        const deck = activeMedia();
+        if (deck && Number.isFinite(deck.duration)) deck.currentTime = Math.max(0, Math.min(deck.duration, details.seekTime));
+      }
+    }); } catch {}
+    try { navigator.mediaSession.setActionHandler('stop', () => {
+      const deck = activeMedia(); if (deck) { deck.pause(); deck.currentTime = 0; }
+    }); } catch {}
+  }
+} catch {}
+
+if (window.spider && typeof window.spider.onMediaKey === 'function') {
+  try {
+    window.spider.onMediaKey((action) => {
+      try {
+        if (action === 'playpause') window.__spiderPlayerBridge?.togglePlay?.();
+        else if (action === 'next') window.__spiderPlayerBridge?.next?.();
+        else if (action === 'previous') window.__spiderPlayerBridge?.previous?.();
+        else if (action === 'stop') {
+          const deck = activeMedia(); if (deck) { deck.pause(); deck.currentTime = 0; }
+        }
+      } catch {}
+    });
+  } catch {}
+}
+const $$ = (selector) => [...document.querySelectorAll(selector)];
+
+// React owns the document whenever the root mount exists. The flag is
+// retained for compatibility with older startup paths.
+const IS_REACT_UI = Boolean(
+  typeof document !== 'undefined' && (
+    document.getElementById('root') ||
+    window.__SPIDER_REACT_UI__ ||
+    window.IS_REACT_UI ||
+    window.__SPIDER_REACT_PLAYER__
+  )
+);
+
+// No deferred DOM bindings — the engine now assumes the React UI owns
+// DOM and will not attempt to patch missing elements. Callers should
+// check `IS_REACT_UI` or guard selectors before accessing returned nodes.
+
+const decks = [null, null];
+
+function resolveDecks() {
+  if (!decks[0]) decks[0] = $('#deckA');
+  if (!decks[1]) decks[1] = $('#deckB');
+  return decks;
+}
+
+function isReactOwned(el) {
+  if (!el) return false;
+  try {
+    if (typeof el.hasAttribute === 'function' && el.hasAttribute('data-reactroot')) return true;
+    return Object.keys(el).some((k) => k.startsWith('__reactInternalInstance$') || k.startsWith('__reactFiber$'));
+  } catch {
+    return false;
+  }
+}
+
+function normalizeArtworkMetadata(src) {
+  const s = String(src || '').trim();
+  const lower = s.toLowerCase();
+  if (!/^https?:|^data:|^blob:/.test(lower)) return null;
+  let type = 'image/png';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) type = 'image/jpeg';
+  else if (lower.endsWith('.webp')) type = 'image/webp';
+  else if (lower.endsWith('.gif')) type = 'image/gif';
+  return { src: s, sizes: '512x512', type };
+}
+const state = {
+  library: [],
+  queue: [],
+  currentIndex: -1,
+  activeDeck: 0,
+  transitioning: false,
+  crossfadeTriggered: false,
+  shuffle: false,
+  repeat: 'off',
+  masterVolume: 0.82,
+  muted: false,
+  partyEnabled: false,
+  partyPin: '',
+  partyRequestLimit: 40,
+  partyVoting: true,
+  guestRequests: [],
+  nearby: { active: false },
+  sharedFiles: [],
+  audioContext: null,
+  audioGraphs: [],
+  eqEnabled: true,
+  eqGains: Array(31).fill(0),
+  preampDb: 0,
+  outputGainDb: 0,
+  limiterEnabled: true,
+  programGain: 1,
+  stereoWidth: 1,
+  stereoBalance: 0,
+  outputDeviceId: 'default',
+  visualizerMode: 'web',
+  lightweightMode: false,
+  queueSearch: '',
+  miniPlayer: false,
+  crossfade: 4,
+  aiDj: {
+    enabled: false,
+    prepareSeconds: 45,
+    voiceVolume: 1,
+    musicDuckLevel: 0.3,
+    crossfadeDuration: 4,
+    pendingBreak: null,
+    endingNotifiedFor: ''
+  },
+  radio: {
+    active: false,
+    stationName: 'Spider Radio',
+    currentShow: '',
+    djName: '',
+    listenerCount: 0,
+    peakListeners: 0,
+    publicUrl: '',
+    qrDataUrl: '',
+    nowPlaying: '',
+    bitrate: '',
+    format: '',
+    startedAt: null,
+    uptime: '',
+    connectionStatus: 'offline',
+    profiles: [],
+    recorders: new Map()
+  },
+  broadcastRecovery: { enabled: true, silenceThresholdMs: 5000, silenceDetectedAt: null, lastRecoveryAt: 0 },
+  broadcastDestination: null,
+  inputStreams: new Map(),
+  audioBuffers: new Map(),
+  cartSources: new Set(),
+  panicMuted: false,
+  djMic: {
+    stream: null,
+    source: null,
+    gainNode: null,
+    analyser: null,
+    levelData: null,
+    inputDeviceId: 'default',
+    gain: 1,
+    duckDb: 14,
+    ducking: true,
+    duckingActive: false,
+    pushToTalk: false,
+    enabled: false,
+    live: false,
+    monitor: false
+  },
+  transfers: new Map()
+};
+
+const EQ_FREQUENCIES = [20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000];
+const IDLE_FREQUENCY_DATA = new Uint8Array(1024);
+const IDLE_WAVE_DATA = new Uint8Array(2048).fill(128);
+const EQ_PRESETS = {
+  flat: Array(31).fill(0),
+  bass: [4, 4, 4, 4, 3, 3, 2, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  vocal: [-2, -2, -1, -1, 0, 0, 1, 2, 2, 3, 3, 3, 3, 2, 2, 3, 4, 4, 4, 3, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0],
+  rock: [3, 3, 3, 2, 2, 1, 0, -1, -2, -2, -1, 0, 1, 2, 2, 2, 2, 1, 2, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 2, 1],
+  night: [2, 2, 2, 2, 1, 1, 0, 0, -1, -1, -1, -1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0]
+};
+const makeEqPreset = (shape) => EQ_FREQUENCIES.map((_frequency, index) => {
+  const position = index / (EQ_FREQUENCIES.length - 1) * (shape.length - 1);
+  const low = Math.floor(position);
+  const high = Math.min(shape.length - 1, low + 1);
+  const amount = position - low;
+  return Number((shape[low] * (1 - amount) + shape[high] * amount).toFixed(1));
+});
+Object.assign(EQ_PRESETS, {
+  pop: makeEqPreset([-1, 1, 3, 1, -1, 2, 3]),
+  rap: makeEqPreset([4, 3, 1, -1, 1, 3, 2]),
+  'bass boost': makeEqPreset([7, 6, 4, 2, 0, 0, 0]),
+  'bass boost heavy': makeEqPreset([9, 8, 6, 3, 0, 0, 0]),
+  'vocal clarity': makeEqPreset([-3, -2, -1, 2, 4, 3, 1]),
+  metal: makeEqPreset([4, 3, 2, -1, -2, 4, 5]),
+  acoustic: makeEqPreset([2, 1, 0, 2, 3, 3, 2]),
+  electronic: makeEqPreset([5, 3, 1, -2, 1, 4, 5]),
+  classical: makeEqPreset([3, 2, 1, 0, -1, 1, 3]),
+  'spoken word': makeEqPreset([-3, -2, -1, 2, 4, 2, -1]),
+  'radio voice': makeEqPreset([-5, -3, 0, 4, 5, 2, -3]),
+  'dj live': makeEqPreset([3, 2, 1, 0, 1, 3, 3]),
+  'headphones': makeEqPreset([2, 1, 0, 0, 1, 2, 2])
+});
+const EQ_PRESETS_KEY = 'spider.audio.eq.presets';
+const normalizeEqGains = (gains) => {
+  if (!Array.isArray(gains)) return [...EQ_PRESETS.flat];
+  if (gains.length === EQ_FREQUENCIES.length) return gains.map((value) => Number(value) || 0);
+  if (gains.length === 10) {
+    return EQ_FREQUENCIES.map((frequency) => {
+      const position = Math.log(frequency / 32) / Math.log(16000 / 32) * 9;
+      const low = Math.max(0, Math.floor(position));
+      const high = Math.min(9, Math.ceil(position));
+      const amount = position - low;
+      return Number(gains[low] || 0) * (1 - amount) + Number(gains[high] || 0) * amount;
+    });
+  }
+  return [...EQ_PRESETS.flat];
+};
+const PERSISTENCE_KEY = 'spider-player-state-v2';
+let saveTimer;
+
+function saveState() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(PERSISTENCE_KEY, JSON.stringify({
+        library: state.library,
+        queue: state.queue,
+        shuffle: state.shuffle,
+        repeat: state.repeat,
+        masterVolume: state.masterVolume,
+        crossfade: Number.isFinite(state.crossfade) ? state.crossfade : 0,
+        eqEnabled: state.eqEnabled,
+        eqGains: state.eqGains,
+        preampDb: state.preampDb,
+        outputGainDb: state.outputGainDb,
+        limiterEnabled: state.limiterEnabled,
+        programGain: state.programGain,
+        stereoWidth: state.stereoWidth,
+        stereoBalance: state.stereoBalance,
+        outputDeviceId: state.outputDeviceId,
+        visualizerMode: state.visualizerMode,
+        lightweightMode: state.lightweightMode,
+        partyPin: state.partyPin,
+        partyRequestLimit: state.partyRequestLimit,
+        partyVoting: state.partyVoting,
+        micInputDeviceId: state.djMic.inputDeviceId,
+        micGain: state.djMic.gain,
+        micDuckDb: state.djMic.duckDb,
+        micDucking: state.djMic.ducking,
+        micPushToTalk: state.djMic.pushToTalk,
+        radioProfiles: state.radio.profiles,
+        broadcastDraft: {
+          name: $('#broadcastName')?.value || '',
+          dj: $('#broadcastDj')?.value || '',
+          description: $('#broadcastDescription')?.value || ''
+        }
+      }));
+    } catch {}
+  }, 180);
+}
+
+function restoreState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PERSISTENCE_KEY) || '{}');
+    state.library = Array.isArray(saved.library) ? saved.library : [];
+    state.queue = Array.isArray(saved.queue) ? saved.queue : [];
+    state.shuffle = Boolean(saved.shuffle);
+    state.repeat = ['off', 'one', 'all'].includes(saved.repeat) ? saved.repeat : 'off';
+    state.masterVolume = Number.isFinite(saved.masterVolume) ? saved.masterVolume : .82;
+    state.eqEnabled = saved.eqEnabled !== false;
+    state.eqGains = normalizeEqGains(saved.eqGains);
+    state.preampDb = Number.isFinite(saved.preampDb) ? saved.preampDb : 0;
+    state.outputGainDb = Number.isFinite(saved.outputGainDb) ? saved.outputGainDb : 0;
+    state.limiterEnabled = saved.limiterEnabled !== false;
+    state.programGain = Number.isFinite(saved.programGain) ? Math.max(0, Math.min(1.25, saved.programGain)) : 1;
+    state.stereoWidth = Number.isFinite(saved.stereoWidth) ? saved.stereoWidth : 1;
+    state.stereoBalance = Number.isFinite(saved.stereoBalance) ? saved.stereoBalance : 0;
+    state.outputDeviceId = saved.outputDeviceId || 'default';
+    state.visualizerMode = [
+      'web',
+      'bars',
+      'wave',
+      'spider',
+      'nebula',
+      'pulse',
+      'bcn-emergency-broadcast',
+      'broken-skyline',
+      'mercer-ninth',
+      'his-honor',
+      'hollow-man',
+      'platform-six',
+      'dead-district',
+      'apartment-17',
+      'bcn-nightwatch',
+      'house-of-echoes',
+      'neon-graves',
+      'unbroken-signal',
+      'broken-city-live',
+      'off'
+    ].includes(saved.visualizerMode) ? saved.visualizerMode : 'web';
+    state.lightweightMode = Boolean(saved.lightweightMode);
+    state.partyPin = String(saved.partyPin || '');
+    state.partyRequestLimit = Number(saved.partyRequestLimit) || 40;
+    state.partyVoting = saved.partyVoting !== false;
+    state.djMic.inputDeviceId = saved.micInputDeviceId || 'default';
+    state.djMic.gain = Number.isFinite(saved.micGain) ? Math.max(0, Math.min(2, saved.micGain)) : 1;
+    state.djMic.duckDb = Number.isFinite(saved.micDuckDb) ? Math.max(0, Math.min(24, saved.micDuckDb)) : 14;
+    state.djMic.ducking = saved.micDucking !== false;
+    state.djMic.pushToTalk = Boolean(saved.micPushToTalk);
+    state.radio.profiles = Array.isArray(saved.radioProfiles) ? saved.radioProfiles : [];
+    if (IS_REACT_UI) return;
+    const draft = saved.broadcastDraft || {};
+    $('#broadcastName').value = draft.name || '';
+    $('#broadcastDj').value = draft.dj || '';
+    $('#broadcastDescription').value = draft.description || '';
+    state.crossfade = Number.isFinite(saved.crossfade) ? saved.crossfade : 4;
+    if ($('#crossfade')) $('#crossfade').value = String(state.crossfade);
+    if ($('#crossfadeValue')) $('#crossfadeValue').textContent = `${state.crossfade}s`;
+    $('#volume').value = String(Math.round(state.masterVolume * 100));
+    $('#stereoWidth').value = String(Math.round(state.stereoWidth * 100));
+    $('#stereoBalance').value = String(Math.round(state.stereoBalance * 100));
+    $('#partyPin').value = state.partyPin;
+    $('#partyRequestLimit').value = String(state.partyRequestLimit);
+    $('#partyVoting').checked = state.partyVoting;
+    $('#micGain').value = String(Math.round(state.djMic.gain * 100));
+    $('#micGainValue').textContent = `${Math.round(state.djMic.gain * 100)}%`;
+    $('#micDuckAmount').value = String(state.djMic.duckDb);
+    $('#micDuckValue').textContent = `-${state.djMic.duckDb} dB`;
+    $('#micDucking').checked = state.djMic.ducking;
+    $('#micPushToTalk').checked = state.djMic.pushToTalk;
+    $('#micMonitor').checked = false;
+    $('#shuffleButton').classList.toggle('active', state.shuffle);
+    $('#repeatButton').classList.toggle('active', state.repeat !== 'off');
+    $('#repeatButton small').textContent = state.repeat === 'one' ? 'ONE' : state.repeat === 'all' ? 'ALL' : 'OFF';
+    $('#visualizerModeButton').textContent = `VISUALIZER · ${state.visualizerMode.toUpperCase()}`;
+  } catch {}
+}
+
+let toastTimer;
+let dragDepth = 0;
+let lastVisualizerFrameAt = 0;
+
+function toast(message) {
+  if (IS_REACT_UI) {
+    try { console.log('toast:', message); } catch {}
+    return;
+  }
+
+  const element = $('#toast');
+  if (!element) return;
+  if (typeof element.textContent !== 'undefined') element.textContent = message;
+  if (element.classList) element.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => element.classList && element.classList.remove('show'), 2800);
+}
+
+function formatTime(value) {
+  if (!Number.isFinite(value) || value < 0) return '0:00';
+  const seconds = Math.floor(value);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const tail = String(seconds % 60).padStart(2, '0');
+  return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${tail}` : `${minutes}:${tail}`;
+}
+
+function displayName(name) {
+  return String(name || 'Untitled').replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ');
+}
+
+function sourceLabel(item) {
+  if (!item) return 'LOCAL';
+  if (item.source === 'network') return 'NETWORK STREAM';
+  if (item.source === 'guest') return 'GUEST REQUEST';
+  return item.extension ? `LOCAL · ${item.extension}` : 'LOCAL MEDIA';
+}
+
+function currentItem() {
+  return state.queue[state.currentIndex] || null;
+}
+
+function activeMedia() {
+  resolveDecks();
+  return decks[state.activeDeck];
+}
+
+function playable(item) {
+  return Boolean(item && item.url);
+}
+
+function applyDeckVolume(deck, gain = Number(deck.dataset.gain || 1)) {
+  deck.dataset.gain = String(gain);
+  const duckFactor = state.djMic.duckingActive ? 10 ** (-state.djMic.duckDb / 20) : 1;
+  deck.volume = Math.max(0, Math.min(1, state.masterVolume * gain * duckFactor));
+  deck.muted = state.muted || state.panicMuted;
+}
+
+function ensureAudioEngine() {
+  resolveDecks();
+  if (state.audioContext) {
+    if (state.audioContext.state === 'suspended') void state.audioContext.resume();
+    return state.audioContext;
+  }
+
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return null;
+  const context = new AudioContext();
+  state.audioContext = context;
+  state.broadcastDestination = context.createMediaStreamDestination();
+  state.audioGraphs = decks.map((deck) => {
+    const source = context.createMediaElementSource(deck);
+    const filters = EQ_FREQUENCIES.map((frequency, index) => {
+      const filter = context.createBiquadFilter();
+      filter.type = index === 0 ? 'lowshelf' : index === EQ_FREQUENCIES.length - 1 ? 'highshelf' : 'peaking';
+      filter.frequency.value = frequency;
+      filter.Q.value = 1.1;
+      return filter;
+    });
+    source.connect(filters[0]);
+    for (let index = 0; index < filters.length - 1; index += 1) filters[index].connect(filters[index + 1]);
+
+    const splitter = context.createChannelSplitter(2);
+    const merger = context.createChannelMerger(2);
+    const matrix = {
+      leftLeft: context.createGain(),
+      leftRight: context.createGain(),
+      rightLeft: context.createGain(),
+      rightRight: context.createGain()
+    };
+    const panner = context.createStereoPanner();
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.84;
+    filters.at(-1).connect(splitter);
+    splitter.connect(matrix.leftLeft, 0);
+    splitter.connect(matrix.leftRight, 0);
+    splitter.connect(matrix.rightLeft, 1);
+    splitter.connect(matrix.rightRight, 1);
+    matrix.leftLeft.connect(merger, 0, 0);
+    matrix.rightLeft.connect(merger, 0, 0);
+    matrix.leftRight.connect(merger, 0, 1);
+    matrix.rightRight.connect(merger, 0, 1);
+    merger.connect(panner);
+    const preamp = context.createGain();
+    const outputGain = context.createGain();
+    const limiter = context.createDynamicsCompressor();
+    limiter.threshold.value = -1;
+    limiter.knee.value = 0;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.1;
+    const programGain = context.createGain();
+    panner.connect(preamp);
+    preamp.connect(outputGain);
+    outputGain.connect(limiter);
+    limiter.connect(programGain);
+    programGain.connect(analyser);
+    analyser.connect(context.destination);
+    analyser.connect(state.broadcastDestination);
+    return {
+      filters,
+      preamp,
+      outputGain,
+      limiter,
+      programGain,
+      matrix,
+      panner,
+      analyser,
+      frequencyData: new Uint8Array(analyser.frequencyBinCount),
+      waveData: new Uint8Array(analyser.fftSize)
+    };
+  });
+  // If the new audio engine scaffold is present, attach the deck audio elements
+  try {
+    if (window.__spiderAudioEngine && typeof window.__spiderAudioEngine.attachElement === 'function') {
+      decks.forEach((d) => { try { window.__spiderAudioEngine.attachElement(d) } catch {} });
+    } else if (window.__spiderPlayerBridge && typeof window.__spiderPlayerBridge.attachAllAudioElements === 'function') {
+      try { window.__spiderPlayerBridge.attachAllAudioElements() } catch {}
+    }
+  } catch {}
+  applySoundSettings();
+  if (state.outputDeviceId && typeof context.setSinkId === 'function') {
+    void context.setSinkId(state.outputDeviceId).catch(() => {});
+  }
+  void context.resume();
+  return context;
+}
+
+function applySoundSettings() {
+  for (const graph of state.audioGraphs) {
+    graph.filters.forEach((filter, index) => {
+      filter.gain.setTargetAtTime(state.eqEnabled ? state.eqGains[index] : 0, state.audioContext.currentTime, 0.015);
+    });
+    const direct = (1 + state.stereoWidth) / 2;
+    const cross = (1 - state.stereoWidth) / 2;
+    graph.matrix.leftLeft.gain.setTargetAtTime(direct, state.audioContext.currentTime, 0.015);
+    graph.matrix.rightRight.gain.setTargetAtTime(direct, state.audioContext.currentTime, 0.015);
+    graph.matrix.leftRight.gain.setTargetAtTime(cross, state.audioContext.currentTime, 0.015);
+    graph.matrix.rightLeft.gain.setTargetAtTime(cross, state.audioContext.currentTime, 0.015);
+    graph.panner.pan.setTargetAtTime(state.stereoBalance, state.audioContext.currentTime, 0.015);
+    graph.preamp.gain.setTargetAtTime(10 ** (state.preampDb / 20), state.audioContext.currentTime, 0.015);
+    graph.outputGain.gain.setTargetAtTime(10 ** (state.outputGainDb / 20), state.audioContext.currentTime, 0.015);
+    graph.limiter.threshold.setTargetAtTime(state.limiterEnabled ? -1 : 0, state.audioContext.currentTime, 0.015);
+    graph.limiter.ratio.setTargetAtTime(state.limiterEnabled ? 20 : 1, state.audioContext.currentTime, 0.015);
+    graph.programGain.gain.setTargetAtTime(state.panicMuted ? 0 : state.programGain, state.audioContext.currentTime, 0.015);
+  }
+}
+
+function renderEqualizer() {
+  if (IS_REACT_UI) return;
+  const bands = $('#eqBands');
+  if (!bands.children.length) {
+    bands.replaceChildren(...EQ_FREQUENCIES.map((frequency, index) => {
+      const band = document.createElement('div');
+      band.className = 'eq-band';
+      const output = document.createElement('output');
+      output.textContent = '0';
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = '-12';
+      input.max = '12';
+      input.step = '0.5';
+      input.value = '0';
+      input.dataset.band = String(index);
+      input.setAttribute('aria-label', `${frequency} hertz`);
+      const label = document.createElement('label');
+      label.textContent = frequency >= 1000 ? `${frequency / 1000}k` : String(frequency);
+      band.append(output, input, label);
+      return band;
+    }));
+  }
+  $$('#eqBands input').forEach((input, index) => {
+    input.value = String(state.eqGains[index]);
+    input.previousElementSibling.textContent = state.eqGains[index] > 0 ? `+${state.eqGains[index]}` : String(state.eqGains[index]);
+    input.disabled = !state.eqEnabled;
+  });
+  $('#eqEnabled').checked = state.eqEnabled;
+}
+
+function setMicDuckingActive(active) {
+  const next = Boolean(active && state.djMic.ducking && state.djMic.live);
+  if (state.djMic.duckingActive === next) return;
+  state.djMic.duckingActive = next;
+  decks.forEach((deck) => applyDeckVolume(deck));
+}
+
+function getBroadcastRecoveryState() {
+  return {
+    enabled: state.broadcastRecovery.enabled,
+    silenceThresholdMs: state.broadcastRecovery.silenceThresholdMs,
+    fallbackCount: state.queue.filter((item) => playable(item)).length
+  };
+}
+
+function recoverBroadcast() {
+  if (!state.radio.active || !state.broadcastRecovery.enabled) return false;
+  const current = currentItem();
+  const playableQueue = state.queue
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => playable(item));
+
+  if (!playableQueue.length) return false;
+
+  const currentIndex = playableQueue.findIndex(({ item }) => item.id === current?.id);
+  const fallback = playableQueue.find(({ index }) => index !== currentIndex && index > (state.currentIndex >= 0 ? state.currentIndex : -1)) || playableQueue[0];
+
+  if (!fallback || fallback.index === state.currentIndex) return false;
+
+  state.broadcastRecovery.lastRecoveryAt = performance.now();
+  state.broadcastRecovery.silenceDetectedAt = null;
+  void playAt(fallback.index, false);
+  return true;
+}
+
+function evaluateBroadcastRecovery(now) {
+  if (!state.radio.active || !state.broadcastRecovery.enabled) {
+    state.broadcastRecovery.silenceDetectedAt = null;
+    return;
+  }
+
+  const graph = state.audioGraphs[state.activeDeck];
+  if (!graph || !currentItem()) {
+    state.broadcastRecovery.silenceDetectedAt = null;
+    return;
+  }
+
+  graph.analyser.getByteFrequencyData(graph.frequencyData);
+  let total = 0;
+  for (let index = 0; index < graph.frequencyData.length; index += 1) {
+    total += graph.frequencyData[index];
+  }
+
+  const average = total / Math.max(1, graph.frequencyData.length) / 255;
+
+  if (average <= 0.02) {
+    if (state.broadcastRecovery.silenceDetectedAt === null) {
+      state.broadcastRecovery.silenceDetectedAt = now;
+    }
+
+    if (now - state.broadcastRecovery.silenceDetectedAt >= state.broadcastRecovery.silenceThresholdMs) {
+      state.broadcastRecovery.silenceDetectedAt = null;
+      recoverBroadcast();
+    }
+  } else {
+    state.broadcastRecovery.silenceDetectedAt = null;
+  }
+}
+
+function updateDjMicMeter() {
+  const bar = $('#micMeter i');
+  if (IS_REACT_UI) return;
+  if (!bar) return;
+  if (!state.djMic.analyser || !state.djMic.levelData) {
+    if (bar.style) bar.style.width = '0%';
+    setMicDuckingActive(false);
+    return;
+  }
+  state.djMic.analyser.getByteTimeDomainData(state.djMic.levelData);
+  let energy = 0;
+  for (const value of state.djMic.levelData) {
+    const sample = (value - 128) / 128;
+    energy += sample * sample;
+  }
+  const rms = Math.sqrt(energy / state.djMic.levelData.length);
+  const level = Math.min(1, rms * 4.8);
+  bar.style.width = `${Math.round(level * 100)}%`;
+  setMicDuckingActive(rms > .032);
+}
+
+function visualizerFrame(time) {
+  if (state.lightweightMode && time - lastVisualizerFrameAt < 90) {
+    requestAnimationFrame(visualizerFrame);
+    return;
+  }
+  lastVisualizerFrameAt = time;
+
+  updateDjMicMeter();
+  evaluateBroadcastRecovery(time);
+  const canvas = $('#visualizerCanvas');
+  if (!canvas) return;
+
+  const bounds = canvas.getBoundingClientRect();
+  const scale = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.max(1, Math.floor(bounds.width * scale));
+  const height = Math.max(1, Math.floor(bounds.height * scale));
+
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+
+  const context = canvas.getContext('2d');
+  context.clearRect(0, 0, width, height);
+
+  if (state.visualizerMode === 'off') {
+    requestAnimationFrame(visualizerFrame);
+    return;
+  }
+
+  const graph = state.audioGraphs[state.activeDeck];
+  const live = graph && !activeMedia().paused;
+  const frequencyData = graph ? graph.frequencyData : IDLE_FREQUENCY_DATA;
+  const waveData = graph ? graph.waveData : IDLE_WAVE_DATA;
+
+  if (graph) {
+    graph.analyser.getByteFrequencyData(frequencyData);
+    graph.analyser.getByteTimeDomainData(waveData);
+  }
+
+  context.save();
+  context.scale(scale, scale);
+  const w = bounds.width;
+  const h = bounds.height;
+  const pulse = live ? 1 : 0.04 + Math.sin(time / 1100) * 0.015;
+  const bassEnergy = graph ? (() => {
+    let total = 0;
+    for (let index = 0; index < Math.min(24, frequencyData.length); index += 1) total += frequencyData[index];
+    return total / (Math.min(24, frequencyData.length) * 255);
+  })() : 0.2;
+  const midEnergy = graph ? (() => {
+    let total = 0;
+    const start = 24;
+    const end = Math.min(180, frequencyData.length);
+    for (let index = start; index < end; index += 1) total += frequencyData[index];
+    return end > start ? total / ((end - start) * 255) : 0;
+  })() : 0.12;
+  const highEnergy = graph ? (() => {
+    let total = 0;
+    const start = 180;
+    const end = Math.min(512, frequencyData.length);
+    for (let index = start; index < end; index += 1) total += frequencyData[index];
+    return end > start ? total / ((end - start) * 255) : 0;
+  })() : 0.08;
+  context.globalCompositeOperation = 'lighter';
+
+  if (state.visualizerMode === 'bars') {
+    const count = Math.min(72, Math.floor(w / 8));
+    const gap = 3;
+    const barWidth = Math.max(2, (w - gap * (count - 1)) / count);
+    const gradient = context.createLinearGradient(0, h, 0, h * 0.18);
+    gradient.addColorStop(0, 'rgba(95, 24, 166, .42)');
+    gradient.addColorStop(0.55, 'rgba(175, 71, 255, .82)');
+    gradient.addColorStop(1, 'rgba(232, 185, 255, .95)');
+    context.fillStyle = gradient;
+    context.shadowColor = '#a855f7';
+    context.shadowBlur = 12;
+
+    for (let index = 0; index < count; index += 1) {
+      const bin = Math.floor((index / count) ** 1.65 * Math.min(520, frequencyData.length - 1));
+      const strength = live ? frequencyData[bin] / 255 : pulse;
+      const barHeight = Math.max(2, strength * h * 0.62);
+      const x = index * (barWidth + gap);
+      context.fillRect(x, h - barHeight, barWidth, barHeight);
+    }
+  } else if (state.visualizerMode === 'wave') {
+    const gradient = context.createLinearGradient(0, 0, w, 0);
+    gradient.addColorStop(0, 'rgba(92, 28, 164, .18)');
+    gradient.addColorStop(0.5, 'rgba(220, 150, 255, .96)');
+    gradient.addColorStop(1, 'rgba(92, 28, 164, .18)');
+    context.strokeStyle = gradient;
+    context.lineWidth = 2;
+    context.shadowColor = '#b15cff';
+    context.shadowBlur = 16;
+    context.beginPath();
+
+    for (let index = 0; index < waveData.length; index += 1) {
+      const x = (index / (waveData.length - 1)) * w;
+      const sample = live ? (waveData[index] - 128) / 128 : Math.sin(index / 22 + time / 550) * pulse;
+      const y = h * 0.52 + sample * h * 0.31;
+      if (index === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    }
+
+    context.stroke();
+  } else if (state.visualizerMode === 'spider') {
+    const centerX = w / 2;
+    const centerY = h / 2;
+    const rings = 8;
+    const legs = 12;
+
+    context.strokeStyle = 'rgba(192, 132, 252, .75)';
+    context.shadowColor = '#a855f7';
+    context.shadowBlur = 12;
+    context.lineWidth = 1.4;
+
+    for (let leg = 0; leg < legs; leg += 1) {
+      const angle = (leg / legs) * Math.PI * 2 - Math.PI / 2;
+      context.beginPath();
+      context.moveTo(centerX, centerY);
+
+      for (let ring = 1; ring <= rings; ring += 1) {
+        const bin = Math.min(frequencyData.length - 1, ring * 16 + leg * 3);
+        const strength = live ? frequencyData[bin] / 255 : pulse;
+        const radius = Math.min(w, h) * (0.04 + (ring / rings) * 0.4) * (1 + strength * 0.35);
+        const sway = Math.sin(time / 700 + leg + ring) * radius * 0.08;
+        context.lineTo(
+          centerX + Math.cos(angle) * radius + Math.cos(angle + Math.PI / 2) * sway,
+          centerY + Math.sin(angle) * radius + Math.sin(angle + Math.PI / 2) * sway
+        );
+      }
+
+      context.stroke();
+    }
+
+    for (let ring = 1; ring <= rings; ring += 1) {
+      const radius = Math.min(w, h) * (0.04 + (ring / rings) * 0.4);
+      context.beginPath();
+      context.arc(centerX, centerY, radius, 0, Math.PI * 2);
+      context.globalAlpha = 0.55 - (ring / rings) * 0.04;
+      context.stroke();
+    }
+
+    context.globalAlpha = 1;
+    context.fillStyle = '#f3e8ff';
+    context.beginPath();
+    context.arc(centerX, centerY, 5 + pulse * 10, 0, Math.PI * 2);
+    context.fill();
+  } else if (state.visualizerMode === 'nebula') {
+    const particles = Math.min(180, Math.floor(w * h / 4500));
+    context.fillStyle = 'rgba(216, 180, 254, .8)';
+
+    for (let index = 0; index < particles; index += 1) {
+      const angle = index * 2.399 + time / (9000 + index * 4);
+      const distance = (index / particles) ** 0.65 * Math.min(w, h) * 0.58;
+      const bin = index % Math.max(1, frequencyData.length - 1);
+      const strength = live ? frequencyData[bin] / 255 : pulse;
+      const radius = 1 + strength * 3.5;
+      const x = w / 2 + Math.cos(angle) * distance;
+      const y = h / 2 + Math.sin(angle) * distance * 0.62;
+      context.globalAlpha = 0.15 + strength * 0.75;
+      context.beginPath();
+      context.arc(x, y, radius, 0, Math.PI * 2);
+      context.fill();
+    }
+
+    context.globalAlpha = 1;
+  } else if (state.visualizerMode === 'pulse') {
+    const centerX = w / 2;
+    const centerY = h / 2;
+    const rings = 9;
+    context.lineWidth = 2;
+    context.strokeStyle = 'rgba(244, 114, 182, .75)';
+    context.shadowColor = '#ec4899';
+    context.shadowBlur = 18;
+
+    for (let ring = 0; ring < rings; ring += 1) {
+      const bin = Math.min(frequencyData.length - 1, ring * 28);
+      const strength = live ? frequencyData[bin] / 255 : pulse;
+      const radius = Math.min(w, h) * (0.08 + ring * 0.06) + strength * 24;
+      context.globalAlpha = 0.85 - (ring / rings) * 0.07;
+      context.beginPath();
+      context.arc(centerX, centerY, radius, 0, Math.PI * 2);
+      context.stroke();
+    }
+
+    context.globalAlpha = 1;
+  } else if (state.visualizerMode === 'bcn-emergency-broadcast') {
+    const scanLines = 26;
+    for (let index = 0; index < scanLines; index += 1) {
+      const y = (index / scanLines) * h;
+      context.fillStyle = index % 2 === 0 ? 'rgba(20, 20, 28, 0.22)' : 'rgba(130, 180, 255, 0.12)';
+      context.fillRect(0, y, w, Math.max(2, h / scanLines));
+    }
+
+    const noise = live ? 0.2 + (frequencyData[0] / 255) * 0.8 : 0.25;
+    context.fillStyle = `rgba(255,255,255,${0.08 + noise * 0.12})`;
+    for (let index = 0; index < 220; index += 1) {
+      const x = ((index * 89) % w) + Math.sin(time / 420 + index) * 12;
+      const y = ((index * 53) % h) + Math.cos(time / 310 + index) * 14;
+      context.fillRect(x, y, 2, 2);
+    }
+
+    const gradient = context.createLinearGradient(0, 0, w, 0);
+    gradient.addColorStop(0, 'rgba(165, 212, 255, 0.12)');
+    gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.58)');
+    gradient.addColorStop(1, 'rgba(180, 220, 255, 0.14)');
+    context.strokeStyle = gradient;
+    context.lineWidth = 2;
+    context.beginPath();
+
+    for (let index = 0; index < waveData.length; index += 1) {
+      const x = (index / (waveData.length - 1)) * w;
+      const sample = live ? (waveData[index] - 128) / 128 : Math.sin(index / 17 + time / 500) * 0.12;
+      const y = h * 0.52 + sample * h * 0.28 + Math.sin(index / 32 + time / 620) * 12;
+      if (index === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    }
+
+    context.stroke();
+    context.fillStyle = 'rgba(220, 240, 255, 0.8)';
+    context.font = '600 18px Segoe UI';
+    context.fillText('BCN EMERGENCY BROADCAST', w * 0.08, h * 0.18);
+
+    if (Math.sin(time / 2800) > 0.2) {
+      context.fillStyle = 'rgba(255,90,90,0.8)';
+      context.font = '700 36px Segoe UI';
+      context.fillText('SIGNAL COMPROMISED', w * 0.12, h * 0.32);
+    }
+  } else if (state.visualizerMode === 'broken-skyline') {
+    const skylineH = h * 0.42;
+    context.fillStyle = 'rgba(22, 26, 33, 0.9)';
+    context.fillRect(0, h - skylineH, w, skylineH);
+
+    const buildingCount = 16;
+    for (let index = 0; index < buildingCount; index += 1) {
+      const x = (index / buildingCount) * w;
+      const base = h - skylineH + 24;
+      const wiggle = Math.sin(time / 900 + index) * 10;
+      const height = 50 + ((index * 47) % 140) + wiggle;
+      context.fillStyle = 'rgba(44, 51, 66, 0.8)';
+      context.fillRect(x + 6, base - height, 26, height);
+      context.fillStyle = 'rgba(255, 180, 80, 0.85)';
+
+      for (let row = 0; row < 6; row += 1) {
+        const glow = live ? 0.35 + ((frequencyData[(index + row) % frequencyData.length] || 0) / 255) * 0.9 : 0.15;
+        context.globalAlpha = glow;
+        context.fillRect(x + 10, base - height + 10 + row * 14, 8, 8);
+      }
+
+      context.globalAlpha = 1;
+    }
+
+    context.fillStyle = 'rgba(255, 205, 100, 0.28)';
+    context.fillRect(0, h - skylineH, w, 10);
+
+    if (Math.sin(time / 2600) > 0.96) {
+      context.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      context.fillRect(0, h * 0.15, w, 8);
+    }
+  } else if (state.visualizerMode === 'mercer-ninth') {
+    context.fillStyle = 'rgba(10, 13, 19, 0.93)';
+    context.fillRect(0, 0, w, h);
+
+    for (let index = 0; index < 20; index += 1) {
+      const y = (index / 20) * h;
+      context.fillStyle = index % 2 === 0 ? 'rgba(78, 90, 112, 0.12)' : 'rgba(150, 170, 255, 0.18)';
+      context.fillRect(0, y, w, 1.5);
+    }
+
+    context.strokeStyle = 'rgba(130, 198, 255, 0.6)';
+    context.lineWidth = 2;
+    context.beginPath();
+    for (let index = 0; index < w; index += 6) {
+      const sample = live ? waveData[index % waveData.length] : 128;
+      const y = h * 0.55 + ((sample - 128) / 128) * 50;
+      if (index === 0) context.moveTo(index, y);
+      else context.lineTo(index, y);
+    }
+    context.stroke();
+
+    context.fillStyle = 'rgba(108, 180, 255, 0.38)';
+    context.fillRect(w * 0.08, h * 0.22, w * 0.84, h * 0.08);
+
+    context.fillStyle = 'rgba(255, 60, 120, 0.66)';
+    context.fillRect(w * 0.2, h * 0.62, w * 0.12, h * 0.12);
+    context.fillRect(w * 0.7, h * 0.62, w * 0.12, h * 0.12);
+  } else if (state.visualizerMode === 'his-honor') {
+    context.fillStyle = 'rgba(8, 10, 14, 0.96)';
+    context.fillRect(0, 0, w, h);
+    context.fillStyle = 'rgba(100, 110, 120, 0.8)';
+    context.fillRect(w * 0.15, h * 0.18, w * 0.7, h * 0.54);
+
+    context.fillStyle = 'rgba(255, 50, 60, 0.72)';
+    context.fillRect(w * 0.25, h * 0.15, w * 0.5, h * 0.06);
+    context.fillRect(w * 0.2, h * 0.68, w * 0.6, h * 0.08);
+
+    context.strokeStyle = 'rgba(255, 70, 90, 0.8)';
+    context.lineWidth = 2;
+    context.beginPath();
+    for (let index = 0; index < waveData.length; index += 4) {
+      const x = (index / waveData.length) * w;
+      const y = h * 0.5 + ((waveData[index] - 128) / 128) * 100;
+      if (index === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    }
+    context.stroke();
+
+    context.fillStyle = 'rgba(255,255,255,0.18)';
+    context.font = '700 28px Segoe UI';
+    context.fillText('HIS HONOR', w * 0.36, h * 0.14);
+  } else if (state.visualizerMode === 'hollow-man') {
+    context.fillStyle = 'rgba(8, 8, 10, 0.96)';
+    context.fillRect(0, 0, w, h);
+
+    const centerX = w * 0.5;
+    const centerY = h * 0.5;
+    context.strokeStyle = 'rgba(200, 200, 210, 0.65)';
+    context.lineWidth = 2;
+    context.beginPath();
+    for (let index = 0; index < waveData.length; index += 4) {
+      const x = (index / waveData.length) * w;
+      const sample = live ? (waveData[index] - 128) / 128 : Math.sin(index / 18 + time / 420) * 0.15;
+      const y = centerY + sample * 90;
+      if (index === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    }
+    context.stroke();
+
+    context.fillStyle = 'rgba(255,255,255,0.15)';
+    context.fillRect(centerX - 70, centerY - 120, 140, 240);
+  } else if (state.visualizerMode === 'platform-six') {
+    context.fillStyle = 'rgba(16, 18, 22, 0.96)';
+    context.fillRect(0, 0, w, h);
+
+    context.strokeStyle = 'rgba(140, 160, 200, 0.8)';
+    context.lineWidth = 3;
+    context.beginPath();
+    context.moveTo(0, h * 0.72);
+    context.lineTo(w, h * 0.72);
+    context.stroke();
+
+    context.fillStyle = 'rgba(255, 213, 96, 0.7)';
+    context.fillRect(w * 0.32, h * 0.3, w * 0.36, 8);
+
+    context.font = '700 24px Segoe UI';
+    context.fillStyle = 'rgba(255,255,255,0.72)';
+    context.fillText('PLATFORM 6', w * 0.38, h * 0.35);
+  } else if (state.visualizerMode === 'dead-district') {
+    context.fillStyle = 'rgba(6, 8, 11, 0.96)';
+    context.fillRect(0, 0, w, h);
+
+    const gridSize = 22;
+    for (let row = 0; row < h; row += gridSize) {
+      for (let col = 0; col < w; col += gridSize) {
+        const strength = live ? frequencyData[(row + col) % frequencyData.length] / 255 : 0.2;
+        context.fillStyle = `rgba(${Math.round(120 + strength * 120)}, 30, 50, ${0.26 + strength * 0.5})`;
+        context.fillRect(col, row, gridSize - 2, gridSize - 2);
+      }
+    }
+  } else if (state.visualizerMode === 'apartment-17') {
+    context.fillStyle = 'rgba(17, 18, 22, 0.96)';
+    context.fillRect(0, 0, w, h);
+    context.fillStyle = 'rgba(90, 100, 120, 0.4)';
+    context.fillRect(w * 0.18, h * 0.16, w * 0.64, h * 0.62);
+
+    for (let index = 0; index < 40; index += 1) {
+      const x = (index * 17) % w;
+      const y = ((index * 29) % h) + Math.sin(time / 280 + index) * 14;
+      context.fillStyle = 'rgba(160, 210, 255, 0.65)';
+      context.fillRect(x, y, 2, 2);
+    }
+  } else if (state.visualizerMode === 'bcn-nightwatch') {
+    context.fillStyle = 'rgba(8, 10, 15, 0.96)';
+    context.fillRect(0, 0, w, h);
+
+    const cells = 4;
+    for (let i = 0; i < cells; i += 1) {
+      const x = (w / cells) * i + 22;
+      const y = 32;
+      const cellW = w / cells - 44;
+      const cellH = h - 64;
+      context.strokeStyle = 'rgba(255,255,255,0.18)';
+      context.strokeRect(x, y, cellW, cellH);
+
+      const strength = live ? frequencyData[(i + 1) * 4] / 255 : 0.2;
+      context.fillStyle = `rgba(123, 215, 255, ${0.08 + strength * 0.5})`;
+      context.fillRect(x + 8, y + 8, cellW - 16, cellH - 16);
+    }
+  } else if (state.visualizerMode === 'house-of-echoes') {
+    context.fillStyle = 'rgba(11, 13, 19, 0.96)';
+    context.fillRect(0, 0, w, h);
+
+    for (let index = 0; index < 18; index += 1) {
+      const x = (index / 18) * w;
+      const doorY = h * 0.7 - (index % 3) * 20;
+      context.strokeStyle = 'rgba(160, 196, 255, 0.55)';
+      context.strokeRect(x + 20, doorY, 26, 120);
+    }
+
+    context.strokeStyle = 'rgba(200, 200, 255, 0.8)';
+    context.beginPath();
+    for (let index = 0; index < waveData.length; index += 4) {
+      const x = (index / waveData.length) * w;
+      const y = h * 0.54 + ((waveData[index] - 128) / 128) * 90;
+      if (index === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    }
+    context.stroke();
+  } else if (state.visualizerMode === 'neon-graves') {
+    context.fillStyle = 'rgba(13, 8, 20, 0.96)';
+    context.fillRect(0, 0, w, h);
+
+    context.fillStyle = 'rgba(255, 85, 170, 0.44)';
+    for (let index = 0; index < 24; index += 1) {
+      const x = (index * 37) % w;
+      const y = h * 0.74 + Math.sin(index + time / 800) * 12;
+      context.fillRect(x, y, 16, 6);
+    }
+
+    context.strokeStyle = 'rgba(126, 248, 255, 0.5)';
+    context.lineWidth = 2;
+    context.beginPath();
+    for (let index = 0; index < waveData.length; index += 3) {
+      const x = (index / waveData.length) * w;
+      const y = h * 0.6 + ((waveData[index] - 128) / 128) * 60;
+      if (index === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    }
+    context.stroke();
+  } else if (state.visualizerMode === 'unbroken-signal') {
+    context.fillStyle = 'rgba(9, 12, 18, 0.96)';
+    context.fillRect(0, 0, w, h);
+    context.fillStyle = 'rgba(150, 210, 255, 0.62)';
+    context.font = '600 18px Segoe UI';
+    context.fillText('THE UNBROKEN', w * 0.08, h * 0.15);
+
+    context.strokeStyle = 'rgba(160, 230, 255, 0.75)';
+    context.beginPath();
+    for (let index = 0; index < waveData.length; index += 2) {
+      const x = (index / waveData.length) * w;
+      const y = h * 0.52 + ((waveData[index] - 128) / 128) * 90;
+      if (index === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    }
+    context.stroke();
+  } else if (state.visualizerMode === 'broken-city-live') {
+    context.fillStyle = 'rgba(7, 12, 18, 0.96)';
+    context.fillRect(0, 0, w, h);
+
+    const rainCount = Math.min(220, Math.max(140, Math.floor(w / 5)));
+    for (let index = 0; index < rainCount; index += 1) {
+      const x = ((index * 37.7) % w) + Math.sin(time / 900 + index) * 10;
+      const y = ((index * 23.1 + time * 0.18) % (h + 80)) - 40;
+      const length = 14 + (index % 6) * 6;
+      context.strokeStyle = `rgba(155, 190, 255, ${0.18 + (index % 13) * 0.015})`;
+      context.lineWidth = 1;
+      context.beginPath();
+      context.moveTo(x, y);
+      context.lineTo(x - 4, y + length);
+      context.stroke();
+    }
+
+    const fog = context.createRadialGradient(w * 0.5, h * 0.22, 0, w * 0.5, h * 0.22, Math.max(w, h) * 0.7);
+    fog.addColorStop(0, `rgba(130, 160, 210, ${0.09 + midEnergy * 0.18})`);
+    fog.addColorStop(0.5, 'rgba(90, 120, 170, 0.10)');
+    fog.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    context.fillStyle = fog;
+    context.fillRect(0, 0, w, h);
+
+    const skylineH = h * 0.36;
+    const skylineY = h - skylineH;
+    context.fillStyle = 'rgba(18, 24, 33, 0.95)';
+    context.fillRect(0, skylineY, w, skylineH);
+
+    const cameraShift = Math.sin(time / 1200) * 7;
+    const buildingCount = 20;
+    for (let index = 0; index < buildingCount; index += 1) {
+      const x = (index / buildingCount) * w;
+      const base = skylineY + 18;
+      const waveA = Math.sin(time / 820 + index * 0.7) * 12;
+      const waveB = Math.sin(time / 1010 + index * 1.3) * 10;
+      const height = 56 + ((index * 43) % 160) + (bassEnergy * 140) + waveA + waveB;
+      const towerChance = Math.sin(time * 0.0009 + index) > 0.98;
+      const buildingHeight = towerChance ? height + 120 + Math.sin(time / 300 + index) * 20 : height;
+
+      context.fillStyle = 'rgba(42, 51, 66, 0.82)';
+      context.fillRect(x + 8 + cameraShift * 0.24, base - buildingHeight, 22, buildingHeight);
+
+      for (let row = 0; row < 6; row += 1) {
+        for (let col = 0; col < 2; col += 1) {
+          const lit = (highEnergy * 0.8 + midEnergy * 0.6 + Math.sin(time / 450 + row + index + col)) > 0.6;
+          const glowAlpha = lit ? 0.4 + highEnergy * 0.6 : 0.08 + (index % 3) * 0.03;
+          context.fillStyle = `rgba(255, 205, 120, ${glowAlpha})`;
+          context.fillRect(x + 12 + col * 8 + cameraShift * 0.18, base - buildingHeight + 12 + row * 16, 4, 8);
+        }
+      }
+    }
+
+    const towerX = w * 0.76;
+    context.strokeStyle = 'rgba(215, 232, 255, 0.5)';
+    context.lineWidth = 2;
+    context.beginPath();
+    context.moveTo(towerX, skylineY + 24);
+    context.lineTo(towerX, skylineY - 130);
+    context.stroke();
+
+    context.fillStyle = 'rgba(255, 210, 120, 0.9)';
+    context.fillRect(towerX - 4, skylineY - 120, 8, 10);
+
+    if (highEnergy > 0.35 || Math.sin(time / 2800) > 0.92) {
+      context.fillStyle = 'rgba(130, 190, 255, 0.38)';
+      context.fillRect(0, skylineY + 30, w, 6);
+    }
+
+    context.strokeStyle = 'rgba(130, 218, 255, 0.7)';
+    context.lineWidth = 1.4;
+    context.beginPath();
+    for (let index = 0; index < waveData.length; index += 4) {
+      const x = (index / waveData.length) * w;
+      const y = h * 0.19 + ((waveData[index] - 128) / 128) * 36;
+      if (index === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    }
+    context.stroke();
+
+    const rooftopFigureVisible = Math.sin(time / 11500) > 0.991;
+    if (rooftopFigureVisible) {
+      context.fillStyle = 'rgba(220, 230, 255, 0.55)';
+      context.beginPath();
+      context.arc(towerX - 100, skylineY - 10, 22, 0, Math.PI * 2);
+      context.fill();
+      context.fillRect(towerX - 118, skylineY + 12, 36, 34);
+    }
+
+    const windowPulse = Math.sin(time / 2200) > 0.965;
+    if (windowPulse) {
+      const windowX = w * 0.22;
+      const windowY = skylineY + 30;
+      context.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      context.fillRect(windowX, windowY, 28, 54);
+    }
+
+    const roadShift = Math.sin(time / 16500) > 0.985;
+    if (roadShift) {
+      context.strokeStyle = 'rgba(255, 80, 110, 0.9)';
+      context.lineWidth = 2;
+      context.beginPath();
+      context.moveTo(w * 0.2, h * 0.72);
+      context.lineTo(w * 0.47, h * 0.63);
+      context.lineTo(w * 0.88, h * 0.74);
+      context.stroke();
+    }
+
+    const messageVisible = Math.sin(time / 9800) > 0.99;
+    if (messageVisible) {
+      context.fillStyle = 'rgba(255,255,255,0.62)';
+      context.font = '700 22px Segoe UI';
+      context.fillText('YOU HAVE BEEN HERE BEFORE', w * 0.26, h * 0.16);
+      context.fillStyle = 'rgba(255, 100, 110, 0.8)';
+      context.font = '700 32px Segoe UI';
+      context.fillText('SIGNAL RECONCILED', w * 0.30, h * 0.22);
+    }
+
+    if (bassEnergy > 0.55 || Math.sin(time / 650) > 0.92) {
+      context.fillStyle = 'rgba(255, 255, 255, 0.18)';
+      context.fillRect(0, skylineY + 10, w, 10);
+    }
+  } else {
+    const centerX = w / 2;
+    const centerY = h * 0.51;
+    const spokes = 48;
+    const baseRadius = Math.min(w, h) * 0.31;
+    const points = [];
+
+    for (let index = 0; index < spokes; index += 1) {
+      const angle = (index / spokes) * Math.PI * 2 - Math.PI / 2;
+      const bin = Math.floor((index / spokes) ** 1.5 * Math.min(600, frequencyData.length - 1));
+      const strength = live ? frequencyData[bin] / 255 : pulse;
+      const radius = baseRadius * (0.62 + strength * 0.7);
+      points.push({ x: centerX + Math.cos(angle) * radius, y: centerY + Math.sin(angle) * radius, angle, radius });
+    }
+
+    context.strokeStyle = 'rgba(181, 94, 255, .17)';
+    context.lineWidth = 1;
+    for (let index = 0; index < spokes; index += 4) {
+      context.beginPath();
+      context.moveTo(centerX, centerY);
+      context.lineTo(points[index].x, points[index].y);
+      context.stroke();
+    }
+
+    for (let ring = 1; ring <= 5; ring += 1) {
+      context.beginPath();
+      points.forEach((point, index) => {
+        const ratio = ring / 5;
+        const x = centerX + (point.x - centerX) * ratio;
+        const y = centerY + (point.y - centerY) * ratio;
+        if (index === 0) context.moveTo(x, y);
+        else context.lineTo(x, y);
+      });
+      context.closePath();
+      context.stroke();
+    }
+
+    const fill = context.createRadialGradient(centerX, centerY, 0, centerX, centerY, baseRadius * 1.4);
+    fill.addColorStop(0, 'rgba(222, 158, 255, .28)');
+    fill.addColorStop(0.55, 'rgba(160, 51, 238, .16)');
+    fill.addColorStop(1, 'rgba(74, 16, 128, 0)');
+    context.fillStyle = fill;
+    context.strokeStyle = live ? 'rgba(210, 133, 255, .82)' : 'rgba(168, 85, 247, .2)';
+    context.lineWidth = live ? 1.6 : 1;
+    context.shadowColor = '#a855f7';
+    context.shadowBlur = live ? 20 : 7;
+    context.beginPath();
+
+    points.forEach((point, index) => {
+      if (index === 0) context.moveTo(point.x, point.y);
+      else context.lineTo(point.x, point.y);
+    });
+
+    context.closePath();
+    context.fill();
+    context.stroke();
+
+    let bass = pulse;
+    if (live) {
+      bass = 0;
+      for (let index = 1; index < 22; index += 1) bass += frequencyData[index];
+      bass /= 21 * 255;
+    }
+
+    const coreRadius = baseRadius * (0.055 + bass * 0.13);
+    const core = context.createRadialGradient(centerX, centerY, 0, centerX, centerY, coreRadius * 2.8);
+    core.addColorStop(0, 'rgba(255, 235, 255, .98)');
+    core.addColorStop(0.2, 'rgba(211, 123, 255, .92)');
+    core.addColorStop(0.55, 'rgba(135, 37, 218, .45)');
+    core.addColorStop(1, 'rgba(95, 21, 166, 0)');
+    context.fillStyle = core;
+    context.shadowBlur = 30 + bass * 38;
+    context.beginPath();
+    context.arc(centerX, centerY, coreRadius * 2.8, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  context.restore();
+  requestAnimationFrame(visualizerFrame);
+}
+
+function syncPartyState() {
+  void window.spider.partyState({
+    enabled: state.partyEnabled,
+    nowPlaying: currentItem() ? {
+      title: currentItem().title,
+      artist: currentItem().artist || ''
+    } : null,
+    queue: state.queue.map((item) => ({
+      id: item.id,
+      title: item.title,
+      artist: item.artist || '',
+      source: item.source || 'local'
+    })),
+    pin: state.partyPin,
+    requestLimit: state.partyRequestLimit,
+    voting: state.partyVoting
+  });
+}
+
+function renderQueue() {
+  if (IS_REACT_UI) {
+    syncPartyState();
+    saveState();
+    return;
+  }
+
+  $('#libraryCount').textContent = `${state.library.length} ${state.library.length === 1 ? 'track' : 'tracks'}`;
+  const list = $('#queueList');
+  const isReactOwned = (el) => {
+    if (!el) return false;
+    try {
+      if (typeof el.hasAttribute === 'function' && el.hasAttribute('data-reactroot')) return true;
+      return Object.keys(el).some((k) => k.startsWith('__reactInternalInstance$') || k.startsWith('__reactFiber$'));
+    } catch {
+      return false;
+    }
+  };
+
+  if (IS_REACT_UI || isReactOwned(list)) {
+    syncPartyState();
+    saveState();
+    return;
+  }
+  if (!state.queue.length) {
+    list.innerHTML = '<div class="empty-list">Your queue is empty.<br>Add media to begin.</div>';
+    syncPartyState();
+    return;
+  }
+
+  const visibleItems = state.queue
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => !state.queueSearch || `${item.title} ${item.artist || ''} ${item.album || ''}`.toLocaleLowerCase().includes(state.queueSearch));
+  if (!visibleItems.length) {
+    list.innerHTML = '<div class="empty-list">No queue items match your search.</div>';
+    syncPartyState();
+    saveState();
+    return;
+  }
+
+  list.replaceChildren(...visibleItems.map(({ item, index }) => {
+    const row = document.createElement('div');
+    row.className = `queue-item${index === state.currentIndex ? ' current' : ''}`;
+    row.dataset.index = String(index);
+    row.draggable = true;
+
+    const cover = document.createElement('div');
+    cover.className = 'queue-cover';
+    cover.textContent = item.source === 'guest' ? '?' : item.source === 'network' ? '≋' : '♪';
+    if (item.artwork) {
+      cover.style.backgroundImage = `url("${String(item.artwork).replace(/"/g, '%22')}")`;
+      cover.style.backgroundSize = 'cover';
+      cover.textContent = '';
+    }
+
+    const name = document.createElement('div');
+    name.className = 'queue-name';
+    const title = document.createElement('b');
+    title.textContent = item.title;
+    const meta = document.createElement('small');
+    meta.textContent = `${item.artist || sourceLabel(item)}${item.votes ? ` · ▲ ${item.votes}` : ''}`;
+    name.append(title, meta);
+
+    const actions = document.createElement('div');
+    actions.className = 'queue-actions';
+    for (const [label, action, titleText] of [['↑', 'up', 'Move up'], ['↓', 'down', 'Move down'], ['×', 'remove', 'Remove']]) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = label;
+      button.dataset.action = action;
+      button.title = titleText;
+      actions.append(button);
+    }
+
+    row.append(cover, name, actions);
+    row.addEventListener('dblclick', () => {
+      if (playable(item)) playAt(index, false);
+      else {
+        void window.spider.openService('spotify', `${item.title} ${item.artist || ''}`);
+        toast(`Find “${item.title}” in your connected service`);
+      }
+    });
+    row.addEventListener('dragstart', (event) => event.dataTransfer.setData('text/x-spider-queue-index', String(index)));
+    row.addEventListener('dragover', (event) => event.preventDefault());
+    row.addEventListener('drop', (event) => {
+      event.preventDefault();
+      const from = Number(event.dataTransfer.getData('text/x-spider-queue-index'));
+      if (!Number.isInteger(from) || from === index || from < 0 || from >= state.queue.length) return;
+      const [moved] = state.queue.splice(from, 1);
+      state.queue.splice(index, 0, moved);
+      if (state.currentIndex === from) state.currentIndex = index;
+      else if (from < state.currentIndex && index >= state.currentIndex) state.currentIndex -= 1;
+      else if (from > state.currentIndex && index <= state.currentIndex) state.currentIndex += 1;
+      renderQueue();
+    });
+    return row;
+  }));
+  syncPartyState();
+  saveState();
+}
+
+function getRadioStateSnapshot() {
+  const item = currentItem();
+  const title = item?.title || state.radio.nowPlaying || '';
+  const artist = item?.artist || '';
+
+  return {
+    stationName: state.radio.stationName || 'Spider Radio',
+    currentShow: state.radio.currentShow || 'Spider Live',
+    djName: state.radio.djName || '',
+    active: Boolean(state.radio.active),
+    listenerCount: Number(state.radio.listenerCount) || 0,
+    peakListeners: Number(state.radio.peakListeners) || 0,
+    publicUrl: state.radio.publicUrl || '',
+    qrDataUrl: state.radio.qrDataUrl || '',
+    nowPlaying: title,
+    nowPlayingMeta: title ? { title, artist } : null,
+    bitrate: state.radio.bitrate || '',
+    format: state.radio.format || '',
+    startedAt: state.radio.startedAt || null,
+    uptime: state.radio.uptime || '',
+    connectionStatus: state.radio.connectionStatus || (state.radio.active ? 'online' : 'offline')
+  };
+}
+
+function updateNowPlaying() {
+  const item = currentItem();
+
+  if (state.radio.active) {
+    state.radio.nowPlaying = item?.title || state.radio.nowPlaying || '';
+    state.radio.connectionStatus = state.radio.connectionStatus || 'online';
+  }
+
+  // When the React UI is mounted it owns the player DOM. Avoid mutating
+  // those nodes directly to prevent React reconciliation errors.
+  if (IS_REACT_UI) {
+    if ('mediaSession' in navigator) {
+      if (!item) navigator.mediaSession.metadata = null;
+      else {
+        const metadata = {
+          title: item.title,
+          artist: item.artist || 'Spider Media Center',
+          album: item.album || sourceLabel(item)
+        };
+        const artwork = String(item.artwork || '');
+        if (artwork.startsWith('http://') || artwork.startsWith('https://') || artwork.startsWith('data:') || artwork.startsWith('blob:')) {
+          metadata.artwork = [normalizeArtworkMetadata(artwork)];
+        }
+        navigator.mediaSession.metadata = new MediaMetadata(metadata);
+      }
+    }
+
+    if (state.radio.active) {
+      void window.spider.updateRadio(item ? { title: item.title, artist: item.artist || '' } : null);
+    }
+
+    return;
+  }
+
+  const titleEl = $('#trackTitle');
+  const metaEl = $('#trackMeta');
+  const sourceBadge = $('#sourceBadge');
+  const emptyState = $('#emptyState');
+
+  if (!item) {
+    if (titleEl) titleEl.textContent = 'Nothing playing';
+    if (metaEl) metaEl.textContent = 'Add local media or a network stream';
+    if (sourceBadge && sourceBadge.style) sourceBadge.style.display = 'none';
+    if ('mediaSession' in navigator) navigator.mediaSession.metadata = null;
+    if (state.radio.active) void window.spider.updateRadio(null);
+    return;
+  }
+
+  if (titleEl) titleEl.textContent = item.title;
+  if (metaEl) metaEl.textContent = item.artist || sourceLabel(item);
+  if (sourceBadge) {
+    if (typeof sourceBadge.textContent !== 'undefined') sourceBadge.textContent = sourceLabel(item);
+    if (sourceBadge.style) sourceBadge.style.display = 'block';
+  }
+  if (emptyState && emptyState.classList) emptyState.classList.add('hidden');
+
+  if ('mediaSession' in navigator) {
+    const metadata = {
+      title: item.title,
+      artist: item.artist || 'Spider Media Center',
+      album: item.album || sourceLabel(item)
+    };
+    const artwork = String(item.artwork || '');
+    const normalizedArtwork = normalizeArtworkMetadata(artwork);
+    if (normalizedArtwork) metadata.artwork = [normalizedArtwork];
+    navigator.mediaSession.metadata = new MediaMetadata(metadata);
+  }
+
+  if (state.radio.active) void window.spider.updateRadio({ title: item.title, artist: item.artist || '' });
+}
+
+function indicesOfPlayable() {
+  return state.queue.map((item, index) => playable(item) ? index : -1).filter((index) => index >= 0);
+}
+
+function nextIndex(direction = 1, from = state.currentIndex) {
+  const valid = indicesOfPlayable();
+  if (!valid.length) return -1;
+  if (state.shuffle && direction > 0 && valid.length > 1) {
+    const alternatives = valid.filter((index) => index !== state.currentIndex);
+    return alternatives[Math.floor(Math.random() * alternatives.length)];
+  }
+
+  let cursor = from;
+  for (let checked = 0; checked < state.queue.length; checked += 1) {
+    cursor += direction;
+    if (cursor >= state.queue.length || cursor < 0) {
+      if (state.repeat === 'all' || direction < 0) cursor = direction > 0 ? 0 : state.queue.length - 1;
+      else return -1;
+    }
+    if (playable(state.queue[cursor])) return cursor;
+  }
+  return -1;
+}
+
+function prepareDeck(deck, item) {
+  if (!deck.dataset.endedBound) {
+    deck.addEventListener('ended', () => {
+      const endedItem = currentItem();
+      emitPlayerEvent('trackEnded', { currentTrack: toAIDJTrack(endedItem, deck) });
+      if (state.aiDj.pendingBreak && state.repeat !== 'one') {
+        const breakItem = state.aiDj.pendingBreak;
+        state.aiDj.pendingBreak = null;
+        playDJBreak(breakItem).finally(() => advance(1, true));
+        return;
+      }
+      if (state.repeat === 'one') {
+        deck.currentTime = 0;
+        void deck.play().catch(() => {});
+        return;
+      }
+      advance(1, true);
+    });
+    deck.addEventListener('timeupdate', () => {
+      if (deck !== activeMedia() || state.currentIndex < 0) return;
+      const item = currentItem();
+      const remaining = Number.isFinite(deck.duration) ? Math.max(0, deck.duration - deck.currentTime) : Infinity;
+      if (item && remaining <= state.aiDj.prepareSeconds && state.aiDj.endingNotifiedFor !== item.id) {
+        state.aiDj.endingNotifiedFor = item.id;
+        emitPlayerEvent('trackEnding', { currentTrack: toAIDJTrack(item, deck), nextTrack: nextAIDJTrack(), secondsRemaining: remaining });
+      }
+    });
+    deck.addEventListener('pause', () => emitPlayerEvent('playbackPaused', { currentTrack: toAIDJTrack(currentItem(), deck) }));
+    deck.addEventListener('play', () => emitPlayerEvent('playbackResumed', { currentTrack: toAIDJTrack(currentItem(), deck) }));
+    deck.dataset.endedBound = '1';
+  }
+
+  if (deck.dataset.itemId === item.id) return;
+  deck.pause();
+  deck.removeAttribute('src');
+  deck.load();
+  deck.src = item.url;
+  deck.dataset.itemId = item.id;
+  deck.preload = 'auto';
+  deck.load();
+}
+
+function normalizeDJAudioUrl(value) {
+  const source = String(value || '').trim();
+  if (/^(https?:|file:|data:|blob:)/i.test(source)) return source;
+  if (/^[A-Za-z]:[\\/]/.test(source)) return `file:///${source.replace(/\\/g, '/')}`;
+  return source;
+}
+
+async function playDJBreak(breakItem) {
+  const source = window.__spiderAudioEngine?.playBuffer;
+  if (typeof source !== 'function') return;
+  const url = normalizeDJAudioUrl(breakItem.audioFile);
+  if (!url) return;
+  try {
+    const audioSource = await source.call(window.__spiderAudioEngine, url, 0, { volume: state.aiDj.voiceVolume });
+    const duration = Number(audioSource?.buffer?.duration) || 12;
+    await new Promise((resolve) => {
+      let settled = false;
+      const finish = () => { if (settled) return; settled = true; resolve(); };
+      audioSource.onended = finish;
+      window.setTimeout(finish, Math.max(1000, (duration + 1) * 1000));
+    });
+  } catch (error) {
+    console.warn('AI DJ break failed; continuing music', error);
+  }
+}
+
+function primeNextDeck() {
+  if (state.transitioning) return;
+  const index = nextIndex(1);
+  if (index < 0 || index === state.currentIndex) return;
+  const standby = decks[1 - state.activeDeck];
+  prepareDeck(standby, state.queue[index]);
+  standby.classList.remove('active');
+  applyDeckVolume(standby, 0);
+}
+
+function animateCrossfade(oldDeck, newDeck, seconds) {
+  const started = performance.now();
+  const duration = Math.max(250, seconds * 1000);
+  state.transitioning = true;
+
+  function frame(now) {
+    const progress = Math.min(1, (now - started) / duration);
+    applyDeckVolume(oldDeck, 1 - progress);
+    applyDeckVolume(newDeck, progress);
+    if (progress < 1 && !newDeck.paused) {
+      requestAnimationFrame(frame);
+      return;
+    }
+    oldDeck.pause();
+    oldDeck.classList.remove('active');
+    newDeck.classList.add('active');
+    applyDeckVolume(oldDeck, 0);
+    applyDeckVolume(newDeck, 1);
+    state.transitioning = false;
+    primeNextDeck();
+  }
+  requestAnimationFrame(frame);
+}
+
+async function playAt(index, blend = false) {
+  const item = state.queue[index];
+  if (!playable(item)) return;
+
+  const audioContext = ensureAudioEngine();
+  if (!audioContext || !state.audioGraphs.length) {
+    toast('Audio engine could not start. Check the output device and restart Spider.');
+    return;
+  }
+  try { void audioContext.resume(); } catch {}
+  const oldDeck = activeMedia();
+  const firstPlay = state.currentIndex < 0 || !oldDeck.src;
+  const newDeckIndex = firstPlay ? state.activeDeck : 1 - state.activeDeck;
+  const newDeck = decks[newDeckIndex];
+  prepareDeck(newDeck, item);
+  applyDeckVolume(newDeck, blend && !firstPlay ? 0 : 1);
+
+  try {
+    void newDeck.play();
+  } catch (error) {
+    toast(`Could not play ${item.title}`);
+    return;
+  }
+
+  state.currentIndex = index;
+  state.activeDeck = newDeckIndex;
+  state.crossfadeTriggered = false;
+  state.aiDj.endingNotifiedFor = '';
+  newDeck.classList.add('active');
+  const nextTrack = nextAIDJTrack();
+  const startedTrack = toAIDJTrack(item, newDeck);
+  emitPlayerEvent('trackChanged', { currentTrack: startedTrack, nextTrack });
+  emitPlayerEvent('trackStarted', { currentTrack: startedTrack, nextTrack });
+  updateNowPlaying();
+  renderQueue();
+  if (!IS_REACT_UI) $('#playButton').textContent = '❚❚';
+
+  const seconds = Number($('#crossfade')?.value ?? state.crossfade ?? 0);
+  if (!firstPlay && blend && seconds > 0 && !oldDeck.paused) {
+    animateCrossfade(oldDeck, newDeck, seconds);
+  } else {
+    oldDeck.classList.toggle('active', oldDeck === newDeck);
+    if (oldDeck !== newDeck) oldDeck.pause();
+    state.transitioning = false;
+    primeNextDeck();
+  }
+}
+
+function togglePlay() {
+  if (state.currentIndex < 0) {
+    const first = indicesOfPlayable()[0];
+    if (first >= 0) void playAt(first, false);
+    else void addMedia();
+    return;
+  }
+  const deck = activeMedia();
+  if (!deck) return;
+
+  if (deck.ended) {
+    deck.currentTime = 0;
+  }
+
+  if (deck.paused) {
+    void deck.play().catch(() => toast('Playback could not resume'));
+    return;
+  }
+
+  deck.pause();
+}
+
+function advance(direction = 1, automatic = false) {
+  if (automatic && state.repeat === 'one') {
+    const deck = activeMedia();
+    deck.currentTime = 0;
+    void deck.play();
+    return;
+  }
+  const target = nextIndex(direction);
+  const crossfade = Number($('#crossfade')?.value ?? state.crossfade ?? 0);
+  if (target >= 0) void playAt(target, direction > 0 && crossfade > 0);
+  else {
+    if (!IS_REACT_UI) $('#playButton').textContent = '▶';
+    activeMedia().pause();
+  }
+}
+
+function addEntries(entries, playFirst = true) {
+  const normalized = entries.map((entry) => ({
+    ...entry,
+    title: entry.title || displayName(entry.name),
+    artist: entry.artist || '',
+    source: entry.source || 'local'
+  }));
+  if (!normalized.length) return;
+  const start = state.queue.length;
+  state.library.push(...normalized.filter((item) => item.source === 'local'));
+  state.queue.push(...normalized);
+  renderQueue();
+  if (playFirst && state.currentIndex < 0) void playAt(start, false);
+  toast(`${normalized.length} item${normalized.length === 1 ? '' : 's'} added`);
+}
+
+async function addMedia() {
+  const entries = await window.spider.chooseMedia();
+  addEntries(entries);
+}
+
+async function addFolder() {
+  toast('Scanning folder and reading track metadata…');
+  const entries = await window.spider.chooseFolder();
+  addEntries(entries);
+  if (entries.length) toast(`${entries.length} media files indexed and saved`);
+}
+
+function getReactPlayerSnapshot() {
+  const item = currentItem();
+  const deck = activeMedia();
+
+  const elapsed =
+    deck && Number.isFinite(deck.currentTime)
+      ? deck.currentTime
+      : 0;
+
+  const duration =
+    deck && Number.isFinite(deck.duration)
+      ? deck.duration
+      : 0;
+
+  const crossfade =
+    (Number.isFinite(state.crossfade) ? state.crossfade : 0);
+
+  return {
+    currentItem: item
+      ? {
+          id: item.id,
+          title: item.title,
+          artist: item.artist || '',
+          album: item.album || '',
+          artwork: item.artwork || '',
+          source: item.source || 'local',
+          extension: item.extension || ''
+        }
+      : null,
+
+    sourceLabel:
+      item
+        ? sourceLabel(item)
+        : '',
+
+    isPlaying:
+      Boolean(
+        item &&
+        deck &&
+        !deck.paused
+      ),
+
+    elapsed,
+
+    duration,
+
+    currentTime: elapsed,
+
+    remainingTime: Math.max(0, duration - elapsed),
+
+    paused: !Boolean(item && deck && !deck.paused),
+
+    nextItem: nextAIDJTrack(),
+
+    seekValue:
+      duration > 0
+        ? Math.max(
+            0,
+            Math.min(
+              1000,
+              (elapsed / duration) * 1000
+            )
+          )
+        : 0,
+
+    shuffle:
+      state.shuffle,
+
+    repeat:
+      state.repeat,
+
+    volumePercent:
+      Math.round(
+        state.masterVolume * 100
+      ),
+
+    muted:
+      state.muted,
+
+    crossfade,
+
+    visualizerMode:
+      state.visualizerMode
+  };
+}
+
+/**
+ * Bridge API consumed by the React UI (`mediaEngine` service).
+ * Methods return snapshots or perform engine actions and should not
+ * mutate React-owned DOM when `IS_REACT_UI` is true.
+ *
+ * getSnapshot(): object - current playback snapshot
+ * getQueueSnapshot(): object - queue and library state
+ * playQueueIndex(index): play item at index
+ * addMedia(): open file picker and add media
+ * togglePlay(), previous(), next(), back(seconds), forward(seconds)
+ * toggleShuffle(), cycleRepeat(), seek(value), setVolume(value)
+ * toggleMute(), setCrossfade(seconds), cycleVisualizer()
+ */
+// Expose a minimal internal engine API for an external bridge file.
+window.__spiderPlayerEngine = {
+  getSnapshot: getReactPlayerSnapshot,
+  getAIDJSnapshot: () => {
+    const current = toAIDJTrack(currentItem(), activeMedia());
+    const next = nextAIDJTrack();
+    return {
+      current,
+      next,
+      paused: !Boolean(current && activeMedia() && !activeMedia().paused),
+      hasNext: Boolean(next),
+      queueLength: state.queue.length,
+      currentIndex: state.currentIndex
+    };
+  },
+  onPlayerEvent,
+  getAIDJConfig: () => ({ ...state.aiDj, pendingBreak: Boolean(state.aiDj.pendingBreak) }),
+  setAIDJConfig: (config = {}) => {
+    state.aiDj = {
+      ...state.aiDj,
+      ...config,
+      enabled: config.enabled === undefined ? state.aiDj.enabled : Boolean(config.enabled),
+      prepareSeconds: Math.max(10, Math.min(180, Number(config.prepareSeconds ?? state.aiDj.prepareSeconds) || 45)),
+      voiceVolume: Math.max(0, Math.min(2, Number(config.voiceVolume ?? state.aiDj.voiceVolume) || 0)),
+      musicDuckLevel: Math.max(0.05, Math.min(1, Number(config.musicDuckLevel ?? state.aiDj.musicDuckLevel) || 0.3)),
+      crossfadeDuration: Math.max(0, Math.min(12, Number(config.crossfadeDuration ?? state.aiDj.crossfadeDuration) || 0))
+    };
+    return { ...state.aiDj, pendingBreak: Boolean(state.aiDj.pendingBreak) };
+  },
+  queueDJBreak: (payload = {}) => {
+    const audioFile = String(payload.audioFile || payload.audioUrl || '').trim();
+    if (!audioFile) return { ok: false, message: 'DJ break audio is missing' };
+    state.aiDj.pendingBreak = {
+      id: payload.id || `dj-break-${Date.now()}`,
+      audioFile,
+      script: String(payload.script || ''),
+      type: payload.type || 'transition'
+    };
+    return { ok: true, id: state.aiDj.pendingBreak.id };
+  },
+  getQueueSnapshot: () => ({
+    libraryCount: state.library.length,
+    currentIndex: state.currentIndex,
+    queue: state.queue.map((item) => ({
+      id: item.id,
+      title: item.title || '',
+      artist: item.artist || '',
+      album: item.album || '',
+      artwork: item.artwork || '',
+      source: item.source || 'local',
+      extension: item.extension || '',
+      votes: Number(item.votes) || 0,
+      url: item.url || null
+    }))
+  }),
+  getLibrarySnapshot: () => ({
+    library: state.library.map((item) => ({
+      id: item.id,
+      title: item.title || '',
+      artist: item.artist || '',
+      album: item.album || '',
+      artwork: item.artwork || '',
+      source: item.source || 'local',
+      extension: item.extension || '',
+      url: item.url || null
+    })),
+    count: state.library.length
+  }),
+  startRadio: (profile = {}) => {
+    const nextProfile = profile || {};
+    const startedAt = state.radio.startedAt || new Date().toISOString();
+    state.radio = {
+      ...state.radio,
+      ...nextProfile,
+      active: true,
+      stationName: nextProfile.name || nextProfile.stationName || state.radio.stationName || 'Spider Radio',
+      currentShow: nextProfile.show || state.radio.currentShow || 'Spider Live',
+      djName: nextProfile.dj || state.radio.djName || '',
+      listenerCount: Number(nextProfile.listenerCount) || state.radio.listenerCount || 0,
+      peakListeners: Math.max(Number(nextProfile.listenerCount) || 0, Number(state.radio.peakListeners) || 0),
+      publicUrl: nextProfile.publicUrl || state.radio.publicUrl || '',
+      nowPlaying: state.radio.nowPlaying || currentItem()?.title || '',
+      connectionStatus: 'live',
+      startedAt,
+      uptime: state.radio.uptime || '00:00:00'
+    };
+    return getRadioStateSnapshot();
+  },
+  stopRadio: () => {
+    state.radio = {
+      ...state.radio,
+      active: false,
+      connectionStatus: 'offline',
+      uptime: '',
+      startedAt: null
+    };
+    return getRadioStateSnapshot();
+  },
+  getRadioState: getRadioStateSnapshot,
+  removeLibraryEntries: (ids = []) => {
+    const removeSet = new Set(Array.isArray(ids) ? ids.filter(Boolean) : [])
+    if (!removeSet.size) return window.__spiderPlayerEngine.getLibrarySnapshot()
+
+    state.library = state.library.filter((item) => !removeSet.has(item.id))
+    state.queue = state.queue.filter((item) => !removeSet.has(item.id))
+    if (state.currentIndex >= state.queue.length) state.currentIndex = state.queue.length - 1
+    saveState()
+    renderQueue()
+    updateNowPlaying()
+    return window.__spiderPlayerEngine.getLibrarySnapshot()
+  },
+  playQueueIndex: (index) => { const pos = Number(index); if (Number.isInteger(pos) && pos >= 0 && pos < state.queue.length && playable(state.queue[pos])) void playAt(pos, false); return window.__spiderPlayerEngine.getQueueSnapshot(); },
+  // Enqueue API for programmatic queue control
+  enqueue(item, playNow = false) {
+    if (!item) return window.__spiderPlayerEngine.getQueueSnapshot();
+    const entry = {
+      id: item.id || (`t-${Date.now()}`),
+      title: item.title || item.name || 'Unknown',
+      artist: item.artist || '',
+      album: item.album || '',
+      artwork: item.artwork || '',
+      source: item.source || 'local',
+      extension: item.extension || '',
+      votes: Number(item.votes) || 0,
+      url: item.url || null
+    };
+    state.library.push(...(entry.source === 'local' ? [entry] : []));
+    state.queue.push(entry);
+    saveState();
+    renderQueue();
+    emitPlayerEvent('queueChanged', window.__spiderPlayerEngine.getQueueSnapshot());
+    if (playNow) {
+      const idx = state.queue.length - 1;
+      if (playable(state.queue[idx])) void playAt(idx, false);
+    }
+    return window.__spiderPlayerEngine.getQueueSnapshot();
+  },
+  enqueueMany(items = [], playFirst = false) {
+    if (!Array.isArray(items) || !items.length) return window.__spiderPlayerEngine.getQueueSnapshot();
+    const normalized = items.map(item => ({
+      id: item.id || (`t-${Date.now()}-${Math.random().toString(36).slice(2,8)}`),
+      title: item.title || item.name || 'Unknown',
+      artist: item.artist || '',
+      album: item.album || '',
+      artwork: item.artwork || '',
+      source: item.source || 'local',
+      extension: item.extension || '',
+      votes: Number(item.votes) || 0,
+      url: item.url || null
+    }));
+    state.library.push(...normalized.filter(i => i.source === 'local'));
+    const start = state.queue.length;
+    state.queue.push(...normalized);
+    saveState();
+    renderQueue();
+    emitPlayerEvent('queueChanged', window.__spiderPlayerEngine.getQueueSnapshot());
+    if (playFirst && state.currentIndex < 0) void playAt(start, false);
+    return window.__spiderPlayerEngine.getQueueSnapshot();
+  },
+  addMedia: async () => { await addMedia(); return getReactPlayerSnapshot(); },
+  clearQueue: () => {
+    decks.forEach((deck) => { deck.pause(); deck.removeAttribute('src'); deck.load(); });
+    state.queue = [];
+    state.currentIndex = -1;
+    saveState();
+    emitPlayerEvent('queueChanged', window.__spiderPlayerEngine.getQueueSnapshot());
+    return window.__spiderPlayerEngine.getQueueSnapshot();
+  },
+  togglePlay: () => { togglePlay(); return getReactPlayerSnapshot(); },
+  previous: () => { advance(-1, false); return getReactPlayerSnapshot(); },
+  next: () => { advance(1, false); return getReactPlayerSnapshot(); },
+  back: (seconds = 10) => { const deck = activeMedia(); if (!deck) return getReactPlayerSnapshot(); deck.currentTime = Math.max(0, (Number(deck.currentTime) || 0) - (Number(seconds) || 10)); return getReactPlayerSnapshot(); },
+  forward: (seconds = 10) => { const deck = activeMedia(); if (!deck) return getReactPlayerSnapshot(); const amount = Number(seconds) || 10; const limit = Number.isFinite(deck.duration) ? deck.duration : Infinity; deck.currentTime = Math.min(limit, (Number(deck.currentTime) || 0) + amount); return getReactPlayerSnapshot(); },
+  toggleShuffle: () => { state.shuffle = !state.shuffle; if (!IS_REACT_UI) { $('#shuffleButton')?.classList.toggle('active', state.shuffle); toast(state.shuffle ? 'Shuffle on' : 'Shuffle off'); } saveState(); return getReactPlayerSnapshot(); },
+  cycleRepeat: () => { state.repeat = state.repeat === 'off' ? 'one' : state.repeat === 'one' ? 'all' : 'off'; if (!IS_REACT_UI) { $('#repeatButton')?.classList.toggle('active', state.repeat !== 'off'); const label = $('#repeatButton small'); if (label) label.textContent = state.repeat === 'one' ? 'ONE' : state.repeat === 'all' ? 'ALL' : 'OFF'; toast(state.repeat === 'one' ? 'Repeat one' : state.repeat === 'all' ? 'Repeat all' : 'Repeat off'); } saveState(); return getReactPlayerSnapshot(); },
+  seek: (value) => { const deck = activeMedia(); const amount = Math.max(0, Math.min(1000, Number(value) || 0)); if (deck && Number.isFinite(deck.duration)) deck.currentTime = (amount / 1000) * deck.duration; return getReactPlayerSnapshot(); },
+  setVolume: (value) => { const amount = Math.max(0, Math.min(100, Number(value) || 0)); state.masterVolume = amount / 100; decks.forEach((deck) => applyDeckVolume(deck)); saveState(); return getReactPlayerSnapshot(); },
+  toggleMute: () => { state.muted = !state.muted; decks.forEach((deck) => applyDeckVolume(deck)); return getReactPlayerSnapshot(); },
+  setCrossfade: (value) => { const seconds = Math.max(0, Math.min(12, Number(value) || 0)); state.crossfade = seconds; if (!IS_REACT_UI) { const control = $('#crossfade'); if (control) control.value = String(seconds); const label = $('#crossfadeValue'); if (label) label.textContent = `${seconds}s`; const gapless = $('#gaplessChip'); if (gapless) gapless.textContent = seconds ? 'CROSSFADE ON' : 'GAPLESS ON'; } saveState(); return getReactPlayerSnapshot(); },
+  cycleVisualizer: () => {
+    const modes = [
+      'web',
+      'bars',
+      'wave',
+      'spider',
+      'nebula',
+      'pulse',
+      'bcn-emergency-broadcast',
+      'broken-skyline',
+      'mercer-ninth',
+      'his-honor',
+      'hollow-man',
+      'platform-six',
+      'dead-district',
+      'apartment-17',
+      'bcn-nightwatch',
+      'house-of-echoes',
+      'neon-graves',
+      'unbroken-signal',
+      'broken-city-live',
+      'off'
+    ];
+    state.visualizerMode = modes[(modes.indexOf(state.visualizerMode) + 1) % modes.length];
+    if (!IS_REACT_UI) {
+      const control = $('#visualizerModeButton');
+      if (control) control.textContent = `VISUALIZER · ${state.visualizerMode.toUpperCase()}`;
+      toast(state.visualizerMode === 'off' ? 'Visualizer off' : `${state.visualizerMode} visualizer`);
+    }
+    saveState();
+    return getReactPlayerSnapshot();
+  },
+  testTone: (frequency = 440, durationMs = 1200, volume = 0.12) => {
+    const context = ensureAudioEngine();
+    if (!context) return { ok: false, message: 'Audio engine is unavailable' };
+    const safeFrequency = Math.max(20, Math.min(20000, Number(frequency) || 440));
+    const safeDuration = Math.max(100, Math.min(5000, Number(durationMs) || 1200));
+    const safeVolume = Math.max(0, Math.min(1, Number(volume) || 0.12));
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.value = safeFrequency;
+    gain.gain.value = 0.0001;
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    const start = context.currentTime;
+    gain.gain.exponentialRampToValueAtTime(safeVolume, start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + safeDuration / 1000);
+    oscillator.start(start);
+    oscillator.stop(start + safeDuration / 1000 + 0.06);
+    return { ok: true, frequency: safeFrequency, durationMs: safeDuration, volume: safeVolume };
+  },
+  resetAudio: () => {
+    state.panicMuted = false;
+    state.muted = false;
+    state.masterVolume = 0.82;
+    state.crossfade = 4;
+    state.djMic.duckingActive = false;
+    state.djMic.ducking = true;
+    state.djMic.pushToTalk = false;
+    state.djMic.enabled = false;
+    state.djMic.live = false;
+    state.eqEnabled = true;
+    state.eqGains = Array.from(EQ_PRESETS.flat);
+    state.preampDb = 0;
+    state.outputGainDb = 0;
+    state.limiterEnabled = true;
+    state.programGain = 1;
+    state.outputDeviceId = 'default';
+    ensureAudioEngine();
+    applySoundSettings();
+    decks.forEach((deck) => applyDeckVolume(deck));
+    saveState();
+    return getReactPlayerSnapshot();
+  },
+  getDiagnostics: () => {
+    const snapshot = getReactPlayerSnapshot();
+    const track = snapshot.currentItem?.title || (state.queue[state.currentIndex] && state.queue[state.currentIndex].title) || 'No track loaded';
+    return {
+      track,
+      mixer: state.audioGraphs.length ? 'Active' : 'Idle',
+      speakers: state.outputDeviceId || 'System default',
+      broadcast: state.radio?.active || state.broadcastDestination ? 'Live' : 'Off',
+      limiter: state.limiterEnabled ? 'On' : 'Off',
+      panicMuted: state.panicMuted ? 'Muted' : 'Normal',
+      sourceLabel: snapshot.sourceLabel || 'Local',
+      recovery: state.broadcastRecovery.enabled ? (state.broadcastRecovery.silenceDetectedAt ? 'Recovering' : 'Armed') : 'Off'
+    };
+  },
+  getLightweightMode: () => state.lightweightMode,
+  setLightweightMode: (enabled) => {
+    state.lightweightMode = Boolean(enabled);
+    saveState();
+    return state.lightweightMode;
+  },
+  getBroadcastRecoveryState: () => getBroadcastRecoveryState(),
+  setBroadcastRecovery: (config = {}) => {
+    if (typeof config.enabled === 'boolean') state.broadcastRecovery.enabled = config.enabled;
+    if (Number.isFinite(config.silenceThresholdMs)) {
+      state.broadcastRecovery.silenceThresholdMs = Math.max(1000, Math.min(30000, Number(config.silenceThresholdMs)));
+    }
+    return getBroadcastRecoveryState();
+  },
+  triggerBroadcastRecovery: () => recoverBroadcast(),
+  getEQ: () => EQ_FREQUENCIES.map((freq, band) => ({ band, freq, q: band === 0 || band === 30 ? 0.7 : 1.1, gainDb: state.eqGains[band] || 0 })),
+  setEQ: (bands = []) => {
+    const gains = normalizeEqGains(bands.map((band) => band && band.gainDb));
+    state.eqGains = gains;
+    state.eqEnabled = true;
+    ensureAudioEngine();
+    applySoundSettings();
+    saveState();
+    return window.__spiderPlayerEngine.getEQ();
+  },
+  listEQPresets: async () => {
+    let custom = {};
+    try { custom = JSON.parse(localStorage.getItem(EQ_PRESETS_KEY) || '{}'); } catch {}
+    return { ...EQ_PRESETS, ...custom };
+  },
+  saveEQPreset: async (name, bands) => {
+    const presets = await window.__spiderPlayerEngine.listEQPresets();
+    const presetName = String(name).trim();
+    presets[presetName] = normalizeEqGains(bands.map((band) => band && band.gainDb));
+    const custom = Object.fromEntries(Object.entries(presets).filter(([key]) => !Object.prototype.hasOwnProperty.call(EQ_PRESETS, key)));
+    localStorage.setItem(EQ_PRESETS_KEY, JSON.stringify(custom));
+    return presets;
+  },
+  loadEQPreset: async (name) => {
+    const presets = await window.__spiderPlayerEngine.listEQPresets();
+    if (!presets[name]) throw new Error('preset not found');
+    state.eqGains = normalizeEqGains(presets[name]);
+    state.eqEnabled = true;
+    ensureAudioEngine();
+    applySoundSettings();
+    saveState();
+    return window.__spiderPlayerEngine.getEQ();
+  },
+  deleteEQPreset: async (name) => {
+    const presets = await window.__spiderPlayerEngine.listEQPresets();
+    if (Object.prototype.hasOwnProperty.call(EQ_PRESETS, name)) return presets;
+    delete presets[name];
+    localStorage.setItem(EQ_PRESETS_KEY, JSON.stringify(Object.fromEntries(Object.entries(presets).filter(([key]) => !Object.prototype.hasOwnProperty.call(EQ_PRESETS, key)))));
+    return presets;
+  },
+  getAnalyzerData: () => {
+    const graph = state.audioGraphs[0];
+    if (!graph) return null;
+    graph.analyser.getByteFrequencyData(graph.frequencyData);
+    return graph.frequencyData;
+  },
+  attachInputStream: async (stream) => {
+    const context = ensureAudioEngine();
+    if (!context || !stream) throw new Error('Audio engine is unavailable');
+    const id = `input_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const source = context.createMediaStreamSource(stream);
+    const gainNode = context.createGain();
+    const effectInput = context.createGain();
+    const compressor = context.createDynamicsCompressor();
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 512;
+    const monitor = context.createGain();
+    monitor.gain.value = 0;
+    source.connect(gainNode);
+    gainNode.connect(effectInput);
+    effectInput.connect(compressor);
+    compressor.connect(analyser);
+    analyser.connect(state.broadcastDestination);
+    compressor.connect(monitor);
+    monitor.connect(context.destination);
+    state.inputStreams.set(id, { source, gainNode, effectInput, compressor, analyser, monitor, userGain: 1, effectNodes: [], effectOscillator: null, voiceEffect: 'clean', levelData: new Uint8Array(analyser.fftSize) });
+    return id;
+  },
+  detachInputStream: (id) => {
+    const input = state.inputStreams.get(id);
+    if (!input) return false;
+    try { input.source.disconnect(); input.gainNode.disconnect(); input.effectInput.disconnect(); input.compressor.disconnect(); input.analyser.disconnect(); input.monitor.disconnect(); } catch {}
+    input.effectNodes?.forEach((node) => { try { node.disconnect(); } catch {} });
+    if (input.effectOscillator) { try { input.effectOscillator.stop(); } catch {} }
+    state.inputStreams.delete(id);
+    return true;
+  },
+  setMicGain: (id, value) => {
+    const input = state.inputStreams.get(id);
+    if (!input) return false;
+    input.userGain = Math.max(0, Math.min(2, Number(value) || 0));
+    input.gainNode.gain.setTargetAtTime(state.panicMuted ? 0 : input.userGain, state.audioContext.currentTime, 0.015);
+    return true;
+  },
+  setInputMonitor: (id, enabled) => {
+    const input = state.inputStreams.get(id);
+    if (!input) return false;
+    input.monitor.gain.setTargetAtTime(enabled ? 0.5 : 0, state.audioContext.currentTime, 0.015);
+    return true;
+  },
+  setInputCompressor: (id, options = {}) => {
+    const input = state.inputStreams.get(id);
+    if (!input) return false;
+    if (Number.isFinite(options.threshold)) input.compressor.threshold.value = Number(options.threshold);
+    if (Number.isFinite(options.ratio)) input.compressor.ratio.value = Number(options.ratio);
+    if (Number.isFinite(options.attack)) input.compressor.attack.value = Number(options.attack);
+    if (Number.isFinite(options.release)) input.compressor.release.value = Number(options.release);
+    return true;
+  },
+  listInputDevices: async () => {
+    if (!navigator.mediaDevices?.enumerateDevices) return [];
+    return (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === 'audioinput').map(({ deviceId, label }) => ({ deviceId, label }));
+  },
+  getInputLevel: (id) => {
+    const input = state.inputStreams.get(id);
+    if (!input) return 0;
+    input.analyser.getByteTimeDomainData(input.levelData);
+    let peak = 0;
+    for (const value of input.levelData) peak = Math.max(peak, Math.abs(value - 128) / 128);
+    return peak;
+  },
+  setVoiceEffect: (id, effect = 'clean') => {
+    const input = state.inputStreams.get(id);
+    if (!input) return false;
+    const selected = ['clean', 'radio', 'megaphone', 'robot', 'alien', 'deep'].includes(effect) ? effect : 'clean';
+    try {
+      input.effectInput.disconnect();
+      input.effectNodes.forEach((node) => { try { node.disconnect(); } catch {} });
+      if (input.effectOscillator) { try { input.effectOscillator.stop(); } catch {} }
+    } catch {}
+    input.effectNodes = [];
+    input.effectOscillator = null;
+    if (selected === 'clean') {
+      input.effectInput.connect(input.compressor);
+    } else if (selected === 'radio' || selected === 'megaphone') {
+      const highpass = state.audioContext.createBiquadFilter();
+      const lowpass = state.audioContext.createBiquadFilter();
+      highpass.type = 'highpass';
+      highpass.frequency.value = selected === 'radio' ? 280 : 520;
+      lowpass.type = 'lowpass';
+      lowpass.frequency.value = selected === 'radio' ? 4200 : 2900;
+      input.effectInput.connect(highpass);
+      highpass.connect(lowpass);
+      lowpass.connect(input.compressor);
+      input.effectNodes = [highpass, lowpass];
+    } else if (selected === 'deep') {
+      const lowShelf = state.audioContext.createBiquadFilter();
+      const lowpass = state.audioContext.createBiquadFilter();
+      lowShelf.type = 'lowshelf';
+      lowShelf.frequency.value = 180;
+      lowShelf.gain.value = 8;
+      lowpass.type = 'lowpass';
+      lowpass.frequency.value = 4800;
+      input.effectInput.connect(lowShelf);
+      lowShelf.connect(lowpass);
+      lowpass.connect(input.compressor);
+      input.effectNodes = [lowShelf, lowpass];
+    } else {
+      const ring = state.audioContext.createGain();
+      const oscillator = state.audioContext.createOscillator();
+      oscillator.type = selected === 'robot' ? 'square' : 'sine';
+      oscillator.frequency.value = selected === 'robot' ? 55 : 180;
+      input.effectInput.connect(ring);
+      oscillator.connect(ring.gain);
+      ring.connect(input.compressor);
+      oscillator.start();
+      input.effectNodes = [ring];
+      input.effectOscillator = oscillator;
+    }
+    input.voiceEffect = selected;
+    return selected;
+  },
+  setDucking: (options = {}) => {
+    state.djMic.ducking = options.enabled !== false;
+    if (Number.isFinite(options.depth)) state.djMic.duckDb = Math.max(0, Math.min(24, Number(options.depth) * 24));
+    return { enabled: state.djMic.ducking, depth: state.djMic.duckDb / 24 };
+  },
+  triggerDucking: (active) => {
+    state.djMic.duckingActive = Boolean(active && state.djMic.ducking);
+    decks.forEach((deck) => applyDeckVolume(deck));
+    return state.djMic.duckingActive;
+  },
+  loadBuffer: async (url) => {
+    const context = ensureAudioEngine();
+    if (!context) throw new Error('Audio engine is unavailable');
+    if (!state.audioBuffers.has(url)) state.audioBuffers.set(url, context.decodeAudioData(await (await fetch(url)).arrayBuffer()));
+    return state.audioBuffers.get(url);
+  },
+  playBuffer: async (url, when = 0, options = {}) => {
+    const context = ensureAudioEngine();
+    const buffer = await window.__spiderPlayerEngine.loadBuffer(url);
+    const source = context.createBufferSource();
+    const gain = context.createGain();
+    source.buffer = buffer;
+    source.loop = Boolean(options.loop);
+    gain.gain.value = Math.max(0, Math.min(1, Number(options.volume ?? 1)));
+    source.connect(gain);
+    gain.connect(context.destination);
+    gain.connect(state.broadcastDestination);
+    source.start(context.currentTime + Math.max(0, Number(when) || 0));
+    source.__spiderGain = gain;
+    const cart = { source, gain, baseGain: gain.gain.value };
+    state.cartSources.add(cart);
+    source.addEventListener?.('ended', () => state.cartSources.delete(cart));
+    return source;
+  },
+  stopBuffer: (source, fadeMs = 120) => {
+    if (!source) return false;
+    const gain = source.__spiderGain;
+    try {
+      const now = state.audioContext.currentTime;
+      if (gain) {
+        gain.gain.cancelScheduledValues(now);
+        gain.gain.setTargetAtTime(0, now, Math.max(0.01, Number(fadeMs) / 1000 / 3));
+      }
+      source.stop(now + Math.max(0.02, Number(fadeMs) / 1000));
+    } catch {}
+    return true;
+  },
+  stopAllBuffers: () => {
+    for (const cart of [...state.cartSources]) window.__spiderPlayerEngine.stopBuffer(cart.source, 120);
+    return true;
+  },
+  getProgramGain: () => state.programGain,
+  setProgramGain: (value) => {
+    state.programGain = Math.max(0, Math.min(1.25, Number(value) || 0));
+    ensureAudioEngine();
+    for (const graph of state.audioGraphs) graph.programGain.gain.setTargetAtTime(state.panicMuted ? 0 : state.programGain, state.audioContext.currentTime, 0.015);
+    saveState();
+    return state.programGain;
+  },
+  panicMute: () => {
+    state.panicMuted = true;
+    decks.forEach((deck) => applyDeckVolume(deck));
+    for (const graph of state.audioGraphs) graph.programGain.gain.setTargetAtTime(0, state.audioContext.currentTime, 0.005);
+    for (const input of state.inputStreams.values()) input.gainNode.gain.setTargetAtTime(0, state.audioContext.currentTime, 0.005);
+    for (const cart of state.cartSources) cart.gain.gain.setTargetAtTime(0, state.audioContext.currentTime, 0.005);
+    return true;
+  },
+  clearPanicMute: () => {
+    state.panicMuted = false;
+    decks.forEach((deck) => applyDeckVolume(deck));
+    applySoundSettings();
+    for (const input of state.inputStreams.values()) input.gainNode.gain.setTargetAtTime(input.userGain ?? 1, state.audioContext.currentTime, 0.015);
+    for (const cart of state.cartSources) cart.gain.gain.setTargetAtTime(cart.baseGain, state.audioContext.currentTime, 0.015);
+    return true;
+  },
+  isPanicMuted: () => state.panicMuted,
+  getDeckGains: () => decks.map((deck) => Number(deck?.dataset.gain || 1)),
+  setDeckGain: (index, value) => {
+    const deck = decks[Number(index)];
+    if (!deck) return false;
+    applyDeckVolume(deck, Math.max(0, Math.min(1.25, Number(value) || 0)));
+    return Number(deck.dataset.gain);
+  },
+  getEQSettings: () => ({ preampDb: state.preampDb, outputGainDb: state.outputGainDb, limiterEnabled: state.limiterEnabled, enabled: state.eqEnabled }),
+  setEQSettings: (settings = {}) => {
+    if (Number.isFinite(settings.preampDb)) state.preampDb = Math.max(-12, Math.min(12, settings.preampDb));
+    if (Number.isFinite(settings.outputGainDb)) state.outputGainDb = Math.max(-12, Math.min(12, settings.outputGainDb));
+    if (typeof settings.limiterEnabled === 'boolean') state.limiterEnabled = settings.limiterEnabled;
+    if (typeof settings.enabled === 'boolean') state.eqEnabled = settings.enabled;
+    ensureAudioEngine();
+    applySoundSettings();
+    saveState();
+    return window.__spiderPlayerEngine.getEQSettings();
+  }
+  ,
+  // Recording the mixed processed broadcast (RECORD SHOW)
+  startRecording: (meta = {}) => {
+    try {
+      ensureAudioEngine();
+      if (state.showRecorder && state.showRecorder.recorder && state.showRecorder.recorder.state === 'recording') return { ok: false, message: 'already recording' };
+      const candidates = [preferredBroadcastMimeType(), 'audio/webm;codecs=opus', 'audio/webm', 'audio/mp4;codecs=mp4a.40.2', 'audio/mp4'].filter(Boolean);
+      const mimeType = candidates.find((v) => MediaRecorder.isTypeSupported(v)) || '';
+      const recorder = new MediaRecorder(state.broadcastDestination.stream, mimeType ? { mimeType, audioBitsPerSecond: 128000 } : { audioBitsPerSecond: 128000 });
+      let recordingId = null;
+      recorder.ondataavailable = async (event) => {
+        if (!event.data || !event.data.size) return;
+        try {
+          const bytes = new Uint8Array(await event.data.arrayBuffer());
+          if (recordingId) await window.spider.recordingAppend(recordingId, bytes);
+        } catch (err) { console.error('append chunk failed', err); }
+      };
+      recorder.onerror = () => { try { recorder.stop(); } catch {} };
+      recorder.onstop = async () => {
+        try {
+          if (!recordingId) { state.showRecorder = null; return; }
+          const name = `${(meta && meta.show) ? meta.show : 'recording'} ${new Date().toISOString().replace(/[:.]/g,'-')}.${mimeType && mimeType.includes('mp4') ? 'mp4' : 'webm'}`;
+          const result = await window.spider.recordingFinish(recordingId, name);
+          if (!result || !result.ok) console.error('Recording finish failed', result && result.error);
+          else {
+            // notify renderer state
+            try { window.postMessage({ type: 'spider:recording:done', path: result.path }, '*'); } catch {}
+          }
+        } catch (err) { console.error('recording.onstop error', err); }
+        state.showRecorder = null;
+      };
+
+      // start streaming target
+      const tempName = `recording-${Date.now()}`;
+      return window.spider.recordingStart(tempName).then((res) => {
+        if (!res || !res.ok) return { ok: false, error: res && res.error };
+        recordingId = res.id;
+        recorder.start(400);
+        recorder.spiderFlushTimer = setInterval(() => { if (recorder.state === 'recording') { try { recorder.requestData(); } catch {} } }, 500);
+        state.showRecorder = { recorder, meta, mimeType, recordingId };
+        return { ok: true };
+      }).catch((err) => ({ ok: false, error: String(err && err.message ? err.message : err) }));
+    } catch (err) { return { ok: false, error: String(err && err.message ? err.message : err) }; }
+  },
+  stopRecording: async () => {
+    try {
+      if (!state.showRecorder || !state.showRecorder.recorder) return { ok: false, message: 'not recording' };
+      const rec = state.showRecorder.recorder;
+      const id = state.showRecorder.recordingId;
+      clearInterval(rec.spiderFlushTimer);
+      if (rec.state === 'recording') try { rec.stop(); } catch {}
+      // wait a short time for onstop to complete and for main to move file
+      // actual path will be delivered via postMessage event
+      return { ok: true, id };
+    } catch (err) { return { ok: false, error: String(err && err.message ? err.message : err) }; }
+  },
+  isRecording: () => Boolean(state.showRecorder && state.showRecorder.recorder && state.showRecorder.recorder.state === 'recording'),
+  // Broadcast controls
+  startRadio: async (profile = {}) => {
+    const name = String(profile.name || '').trim();
+    if (!name) throw new Error('Name this broadcast first');
+    ensureAudioEngine();
+    const liveState = await window.spider.startRadio({
+      name,
+      dj: String(profile.dj || '').trim(),
+      description: String(profile.description || '').trim(),
+      mimeType: profile.mimeType || preferredBroadcastMimeType(),
+    });
+    Object.assign(state.radio, liveState || {}, { active: true, name });
+    return { ...state.radio, ...(liveState || {}) };
+  },
+  stopRadio: async () => {
+    for (const id of state.radio.recorders.keys()) stopListenerRecorder(id);
+    await window.spider.stopRadio();
+    Object.assign(state.radio, { active: false, publicUrl: '', listenerCount: 0 });
+    return { publicUrl: '', listenerCount: 0, active: false };
+  },
+  getRadioState: () => ({ active: state.radio.active, publicUrl: state.radio.publicUrl, listenerCount: state.radio.listenerCount })
+};
+
+// Dynamically load the small external bridge which exposes the stable
+// `window.__spiderPlayerBridge` API for the React UI.
+try { import('./renderer.bridge.js').catch(() => {}); } catch {}
+
+function renderRadioProfiles() {
+  if (IS_REACT_UI) return;
+  const select = $('#broadcastProfiles');
+  select.replaceChildren(new Option('New broadcast', ''), ...state.radio.profiles.map((profile, index) => new Option(profile.name, String(index))));
+}
+
+function renderRadio() {
+  if (IS_REACT_UI) return;
+  const live = state.radio.active;
+  $('#radioIndicator').classList.toggle('on', live);
+  $('#radioIndicator').innerHTML = live ? '<i></i> RADIO LIVE' : '<i></i> RADIO OFF';
+  $('.radio-status-card').classList.toggle('live', live);
+  $('#radioStatusTitle').textContent = live ? $('#broadcastName').value || 'Spider Radio' : 'Ready to broadcast';
+  $('#radioStatusCopy').textContent = live ? 'Your processed Spider audio is live on the public internet.' : 'Your processed Spider audio—EQ, stereo image, crossfades and all—streams to listeners through a public link.';
+  $('#listenerCount').textContent = `${state.radio.listenerCount || 0} LISTENER${state.radio.listenerCount === 1 ? '' : 'S'}`;
+  $('#broadcastUrl').textContent = live ? state.radio.publicUrl : 'Link appears when live';
+  $('#broadcastQr').src = live ? state.radio.qrDataUrl || '' : '';
+  $('#broadcastQr').classList.toggle('hidden', !live || !state.radio.qrDataUrl);
+  $('#broadcastQrPlaceholder').classList.toggle('hidden', live && Boolean(state.radio.qrDataUrl));
+  $('#startBroadcastButton').classList.toggle('hidden', live);
+  $('#stopBroadcastButton').classList.toggle('hidden', !live);
+  $('#openBroadcastButton').disabled = !live;
+  $('#listenerPreviewName').textContent = $('#broadcastName').value.trim() || 'Your station name';
+  const item = currentItem();
+  $('#listenerPreviewNow').textContent = item ? `${item.title}${item.artist ? ` · ${item.artist}` : ''}` : 'Nothing playing';
+}
+
+function stopListenerRecorder(id) {
+  const recorder = state.radio.recorders.get(id);
+  if (!recorder) return;
+  clearInterval(recorder.spiderFlushTimer);
+  if (recorder.state !== 'inactive') recorder.stop();
+  state.radio.recorders.delete(id);
+}
+
+function startListenerRecorder(id) {
+  ensureAudioEngine();
+  if (!state.broadcastDestination || state.radio.recorders.has(id)) return;
+  if (state.audioContext?.state === 'suspended') void state.audioContext.resume();
+  const candidates = [
+    state.radio.mimeType,
+    'audio/mp4;codecs=mp4a.40.2',
+    'audio/mp4',
+    'audio/webm;codecs=opus',
+    'audio/webm'
+  ].filter(Boolean);
+  const mimeType = candidates.find((value) => MediaRecorder.isTypeSupported(value)) || '';
+  const recorder = new MediaRecorder(
+    state.broadcastDestination.stream,
+    mimeType ? { mimeType, audioBitsPerSecond: 128000 } : { audioBitsPerSecond: 128000 }
+  );
+  let sending = Promise.resolve();
+  recorder.ondataavailable = (event) => {
+    if (!event.data.size) return;
+    sending = sending.then(async () => {
+      const bytes = new Uint8Array(await event.data.arrayBuffer());
+      window.spider.radioChunk(id, bytes);
+    });
+  };
+  recorder.onerror = () => stopListenerRecorder(id);
+  state.radio.recorders.set(id, recorder);
+  recorder.start(400);
+  recorder.spiderFlushTimer = setInterval(() => {
+    if (recorder.state === 'recording') {
+      try { recorder.requestData(); } catch {}
+    }
+  }, 500);
+}
+
+function preferredBroadcastMimeType() {
+  return [
+    'audio/mp4;codecs=mp4a.40.2',
+    'audio/mp4',
+    'audio/webm;codecs=opus',
+    'audio/webm'
+  ].find((value) => MediaRecorder.isTypeSupported(value)) || '';
+}
+
+async function startBroadcast() {
+  const name = $('#broadcastName').value.trim();
+  if (!name) {
+    toast('Name this broadcast first');
+    $('#broadcastName').focus();
+    return;
+  }
+  if (!$('#broadcastRights').checked) {
+    toast('Confirm that you have permission to broadcast this content');
+    return;
+  }
+  ensureAudioEngine();
+  $('#startBroadcastButton').disabled = true;
+  $('#startBroadcastButton').textContent = 'Opening public relay…';
+  try {
+    const profile = {
+      name,
+      dj: $('#broadcastDj').value.trim(),
+      description: $('#broadcastDescription').value.trim(),
+      mimeType: preferredBroadcastMimeType()
+    };
+    const liveState = await window.spider.startRadio(profile);
+    Object.assign(state.radio, liveState, { active: true });
+    const existing = state.radio.profiles.findIndex((item) => item.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+    if (existing >= 0) state.radio.profiles[existing] = profile;
+    else state.radio.profiles.unshift(profile);
+    state.radio.profiles = state.radio.profiles.slice(0, 30);
+    renderRadioProfiles();
+    renderRadio();
+    updateNowPlaying();
+    saveState();
+    toast(`${name} is live on the internet`);
+  } catch (error) {
+    toast(error.message || 'The public broadcast could not start');
+  } finally {
+    $('#startBroadcastButton').disabled = false;
+    $('#startBroadcastButton').textContent = 'Start public broadcast';
+  }
+}
+
+async function stopBroadcast() {
+  for (const id of state.radio.recorders.keys()) stopListenerRecorder(id);
+  await window.spider.stopRadio();
+  Object.assign(state.radio, { active: false, publicUrl: '', listenerCount: 0 });
+  renderRadio();
+  toast('Broadcast stopped');
+}
+
+function renderRequests() {
+  if (IS_REACT_UI) return;
+  const area = $('#requestsArea');
+  area.classList.toggle('hidden', !state.partyEnabled);
+  $('#requestCount').textContent = String(state.guestRequests.length);
+  const list = $('#requestList');
+  if (!state.guestRequests.length) {
+    list.innerHTML = '<p class="empty-list">Waiting for requests…</p>';
+    return;
+  }
+  list.replaceChildren(...state.guestRequests.map((item) => {
+    const card = document.createElement('div');
+    card.className = 'request-card';
+    card.dataset.id = item.id;
+    const title = document.createElement('b');
+    title.textContent = item.artist ? `${item.song} · ${item.artist}` : item.song;
+    const guest = document.createElement('small');
+    guest.textContent = `Requested by ${item.guest}`;
+    const actions = document.createElement('div');
+    actions.className = 'request-actions';
+    for (const [label, action] of [['ADD TO QUEUE', 'accept'], ['SKIP', 'reject']]) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = label;
+      button.dataset.requestAction = action;
+      actions.append(button);
+    }
+    card.append(title, guest, actions);
+    return card;
+  }));
+}
+
+async function setPartyEnabled(enabled) {
+  state.partyEnabled = enabled;
+  if (IS_REACT_UI) {
+    renderRequests();
+    syncPartyState();
+    if (enabled && !state.nearby.active) {
+      try { await startNearby(); toast('Party DJ Mode is live'); } catch (error) { state.partyEnabled = false; renderRequests(); syncPartyState(); toast('Could not start the guest portal'); }
+    }
+    return;
+  }
+
+  $('#partyToggle').checked = enabled;
+  $('#partyIndicator').classList.toggle('on', enabled);
+  $('#partyIndicator').innerHTML = enabled ? '<i></i> PARTY LIVE' : '<i></i> PARTY OFF';
+  $('#partyCopy').textContent = enabled ? 'Guests can scan Nearby Share to request songs and watch the queue.' : 'Turn on guest requests and a live shared queue.';
+  $('#partySettings').classList.toggle('hidden', !enabled);
+  renderRequests();
+  syncPartyState();
+  if (enabled && !state.nearby.active) {
+    try {
+      await startNearby();
+      toast('Party DJ Mode is live');
+    } catch (error) {
+      state.partyEnabled = false;
+      $('#partyToggle').checked = false;
+      renderRequests();
+      syncPartyState();
+      toast('Could not start the guest portal');
+    }
+  }
+}
+
+function renderNearby() {
+  if (IS_REACT_UI) return;
+  const active = Boolean(state.nearby.active);
+  $('#toggleNearbyButton').textContent = active ? 'Stop Nearby Share' : 'Start Nearby Share';
+  $('#shareFilesButton').disabled = !active;
+  $('#nearbyUrl').textContent = active ? state.nearby.url : 'Nearby Share is off';
+  $('#qrImage').style.display = active ? 'block' : 'none';
+  $('#qrPlaceholder').style.display = active ? 'none' : 'grid';
+  if (active) $('#qrImage').src = state.nearby.qrDataUrl;
+
+  const files = $('#sharedFiles');
+  if (!state.sharedFiles.length) {
+    files.innerHTML = '<span>No files shared from this PC.</span>';
+    return;
+  }
+  files.replaceChildren(...state.sharedFiles.map((item) => {
+    const row = document.createElement('div');
+    row.className = 'shared-file';
+    const label = document.createElement('span');
+    label.textContent = `${item.name} · ${Math.max(1, Math.ceil(item.size / 1024 / 1024))} MB`;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = 'Remove';
+    remove.onclick = async () => {
+      await window.spider.removeShareFile(item.id);
+      state.sharedFiles = state.sharedFiles.filter((file) => file.id !== item.id);
+      renderNearby();
+    };
+    row.append(label, remove);
+    return row;
+  }));
+}
+
+function renderTransfers() {
+  if (IS_REACT_UI) return;
+  const area = $('#transferActivity');
+  const items = [...state.transfers.values()];
+  area.replaceChildren(...items.map((item) => {
+    const row = document.createElement('div');
+    row.className = 'transfer-row';
+    const name = document.createElement('span');
+    name.textContent = item.name;
+    const status = document.createElement('span');
+    status.textContent = item.error || `${item.progress || 0}%`;
+    const progress = document.createElement('progress');
+    progress.max = 100;
+    progress.value = item.progress || 0;
+    row.append(name, status, progress);
+    return row;
+  }));
+}
+
+async function startNearby() {
+  state.nearby = await window.spider.startNearby();
+  renderNearby();
+  return state.nearby;
+}
+
+async function stopNearby() {
+  state.nearby = await window.spider.stopNearby();
+  state.sharedFiles = [];
+  if (state.partyEnabled) await setPartyEnabled(false);
+  renderNearby();
+  toast('Nearby Share stopped');
+}
+
+function renderDjMic() {
+  if (IS_REACT_UI) return;
+  const mic = state.djMic;
+  const status = $('#micStatus');
+  status.textContent = mic.live ? 'MIC LIVE' : mic.enabled ? 'MIC ARMED' : 'MIC OFF';
+  status.classList.toggle('live', mic.live);
+  $('#micToggleButton').textContent = !mic.enabled ? 'Enable microphone' : mic.live ? 'Mute microphone' : 'Go live on mic';
+  $('#pushToTalkButton').disabled = !mic.enabled;
+  $('#pushToTalkButton').classList.toggle('talking', mic.live && mic.pttPressed);
+  $('#releaseMicButton').classList.toggle('hidden', !mic.enabled);
+}
+
+function applyDjMicGain() {
+  if (!state.djMic.gainNode || !state.audioContext) return;
+  const value = state.djMic.live ? state.djMic.gain : 0;
+  state.djMic.gainNode.gain.setTargetAtTime(value, state.audioContext.currentTime, .012);
+}
+
+function setDjMicLive(live) {
+  if (!state.djMic.enabled) return;
+  state.djMic.live = Boolean(live);
+  applyDjMicGain();
+  if (!state.djMic.live) setMicDuckingActive(false);
+  renderDjMic();
+}
+
+function setDjMicMonitor(enabled) {
+  const mic = state.djMic;
+  if (!mic.gainNode || !state.audioContext) return;
+  if (enabled && !mic.monitor) mic.gainNode.connect(state.audioContext.destination);
+  if (!enabled && mic.monitor) {
+    try { mic.gainNode.disconnect(state.audioContext.destination); } catch {}
+  }
+  mic.monitor = Boolean(enabled);
+}
+
+async function refreshMicrophones() {
+  try {
+    const devices = (await navigator.mediaDevices.enumerateDevices()).filter((item) => item.kind === 'audioinput');
+    const select = $('#micInputDevice');
+    const wanted = state.djMic.inputDeviceId || select.value || 'default';
+    select.replaceChildren(...devices.map((device, index) => {
+      const option = document.createElement('option');
+      option.value = device.deviceId;
+      option.textContent = device.label || (index === 0 ? 'System default microphone' : `Microphone ${index + 1}`);
+      return option;
+    }));
+    if (!devices.length) select.append(new Option('System default microphone', 'default'));
+    if ([...select.options].some((option) => option.value === wanted)) select.value = wanted;
+    else select.value = select.options[0]?.value || 'default';
+  } catch {
+    toast('Windows did not return microphone devices');
+  }
+}
+
+function stopDjMicrophone() {
+  const mic = state.djMic;
+  setDjMicLive(false);
+  setDjMicMonitor(false);
+  for (const track of mic.stream?.getTracks() || []) track.stop();
+  try { mic.source?.disconnect(); } catch {}
+  try { mic.gainNode?.disconnect(); } catch {}
+  try { mic.analyser?.disconnect(); } catch {}
+  Object.assign(mic, {
+    stream: null,
+    source: null,
+    gainNode: null,
+    analyser: null,
+    levelData: null,
+    enabled: false,
+    live: false,
+    monitor: false,
+    pttPressed: false
+  });
+  setMicDuckingActive(false);
+  $('#micMonitor').checked = false;
+  renderDjMic();
+}
+
+async function startDjMicrophone() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    toast('Microphone capture is not available on this PC');
+    return false;
+  }
+  const mic = state.djMic;
+  const selected = $('#micInputDevice').value || mic.inputDeviceId || 'default';
+  const audio = {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: false,
+    channelCount: 1
+  };
+  if (selected !== 'default') audio.deviceId = { exact: selected };
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio, video: false });
+  } catch (error) {
+    if (selected !== 'default' && ['NotFoundError', 'OverconstrainedError'].includes(error.name)) {
+      mic.inputDeviceId = 'default';
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false, channelCount: 1 }, video: false });
+      } catch {
+        toast('No available microphone could be opened');
+        return false;
+      }
+    } else {
+      toast(error.name === 'NotAllowedError' ? 'Allow microphone access in Windows to use the DJ mic' : 'The selected microphone could not be opened');
+      return false;
+    }
+  }
+  const context = ensureAudioEngine();
+  await context.resume();
+  mic.stream = stream;
+  mic.source = context.createMediaStreamSource(stream);
+  mic.gainNode = context.createGain();
+  mic.analyser = context.createAnalyser();
+  mic.analyser.fftSize = 512;
+  mic.analyser.smoothingTimeConstant = .72;
+  mic.levelData = new Uint8Array(mic.analyser.fftSize);
+  mic.source.connect(mic.gainNode);
+  mic.gainNode.connect(mic.analyser);
+  mic.analyser.connect(state.broadcastDestination);
+  mic.enabled = true;
+  mic.live = !mic.pushToTalk;
+  applyDjMicGain();
+  if ($('#micMonitor').checked) setDjMicMonitor(true);
+  const track = stream.getAudioTracks()[0];
+  if (track) {
+    mic.inputDeviceId = track.getSettings().deviceId || selected;
+    track.addEventListener('ended', () => stopDjMicrophone(), { once: true });
+  }
+  await refreshMicrophones();
+  renderDjMic();
+  toast(mic.live ? 'DJ microphone is live in the broadcast mix' : 'DJ microphone armed—hold Space to talk');
+  saveState();
+  return true;
+}
+
+function beginPushToTalk() {
+  if (!state.djMic.enabled || state.djMic.pttPressed) return;
+  state.djMic.pttPressed = true;
+  state.djMic.pttReturnLive = state.djMic.live;
+  setDjMicLive(true);
+}
+
+function endPushToTalk() {
+  if (!state.djMic.pttPressed) return;
+  state.djMic.pttPressed = false;
+  setDjMicLive(Boolean(state.djMic.pttReturnLive));
+}
+
+async function refreshAudioDevices(prompt = false) {
+  try {
+    let selected;
+    if (prompt && navigator.mediaDevices.selectAudioOutput) {
+      selected = await navigator.mediaDevices.selectAudioOutput();
+    }
+    const devices = (await navigator.mediaDevices.enumerateDevices()).filter((item) => item.kind === 'audiooutput');
+    const select = $('#outputDevice');
+    const existing = select.value;
+    select.replaceChildren(...devices.map((device, index) => {
+      const option = document.createElement('option');
+      option.value = device.deviceId;
+      option.textContent = device.label || (index === 0 ? 'System default' : `Audio output ${index + 1}`);
+      return option;
+    }));
+    if (!devices.length) {
+      const option = document.createElement('option');
+      option.value = 'default';
+      option.textContent = 'System default';
+      select.append(option);
+    }
+    const wanted = selected ? selected.deviceId : existing;
+    if ([...select.options].some((option) => option.value === wanted)) select.value = wanted;
+  } catch (error) {
+    if (prompt && error.name !== 'NotAllowedError') toast('Windows did not return an output device');
+  }
+}
+
+async function applyOutputDevice(deviceId) {
+  try {
+    state.outputDeviceId = deviceId;
+    const context = ensureAudioEngine();
+    await Promise.all(decks.map((deck) => typeof deck.setSinkId === 'function' ? deck.setSinkId(deviceId) : Promise.resolve()));
+    if (context && typeof context.setSinkId === 'function') await context.setSinkId(deviceId);
+    const name = $('#outputDevice').selectedOptions[0]?.textContent || 'selected device';
+    toast(`Output switched to ${name}`);
+  } catch {
+    toast('This device could not be selected. Check Windows sound settings.');
+  }
+}
+
+function showPanel(name) {
+  $$('.feature-panel').forEach((panel) => panel.classList.add('hidden'));
+  $('.hero-player').classList.add('hidden');
+  const panel = $(`#${name}Panel`);
+  if (panel) panel.classList.remove('hidden');
+  else $('.hero-player').classList.remove('hidden');
+  $$('.nav-button').forEach((button) => button.classList.toggle('active', button.dataset.panel === name));
+}
+
+if (!IS_REACT_UI) {
+$('#addMediaNav').onclick = addMedia;
+$('#addMediaQueue').onclick = addMedia;
+$('#addFolderNav').onclick = addFolder;
+
+if (!window.__SPIDER_REACT_PLAYER__) {
+  $('#openMediaButton').onclick = addMedia;
+
+  $('#playButton').onclick = togglePlay;
+
+  $('#previousButton').onclick = () => {
+    advance(-1);
+  };
+
+  $('#nextButton').onclick = () => {
+    advance(1);
+  };
+
+  $('#backButton').onclick = () => {
+    const deck = activeMedia();
+
+    deck.currentTime = Math.max(
+      0,
+      deck.currentTime - 10
+    );
+  };
+
+  $('#forwardButton').onclick = () => {
+    const deck = activeMedia();
+
+    deck.currentTime = Math.min(
+      deck.duration || Infinity,
+      deck.currentTime + 10
+    );
+  };
+
+  $('#shuffleButton').onclick = () => {
+    state.shuffle = !state.shuffle;
+
+    $('#shuffleButton').classList.toggle(
+      'active',
+      state.shuffle
+    );
+
+    toast(
+      state.shuffle
+        ? 'Shuffle on'
+        : 'Shuffle off'
+    );
+
+    saveState();
+  };
+
+  $('#repeatButton').onclick = () => {
+    state.repeat =
+      state.repeat === 'off'
+        ? 'one'
+        : state.repeat === 'one'
+          ? 'all'
+          : 'off';
+
+    $('#repeatButton').classList.toggle(
+      'active',
+      state.repeat !== 'off'
+    );
+
+    $('#repeatButton small').textContent =
+      state.repeat === 'one'
+        ? 'ONE'
+        : state.repeat === 'all'
+          ? 'ALL'
+          : 'OFF';
+
+    toast(
+      state.repeat === 'one'
+        ? 'Repeat one'
+        : state.repeat === 'all'
+          ? 'Repeat all'
+          : 'Repeat off'
+    );
+
+    saveState();
+  };
+
+  $('#seek').oninput = (event) => {
+    const deck = activeMedia();
+
+    if (Number.isFinite(deck.duration)) {
+      deck.currentTime =
+        (Number(event.target.value) / 1000) *
+        deck.duration;
+    }
+  };
+
+  $('#volume').oninput = (event) => {
+    state.masterVolume =
+      Number(event.target.value) / 100;
+
+    decks.forEach((deck) => {
+      applyDeckVolume(deck);
+    });
+
+    saveState();
+  };
+
+  $('#muteButton').onclick = () => {
+    state.muted = !state.muted;
+
+    decks.forEach((deck) => {
+      applyDeckVolume(deck);
+    });
+
+    $('#muteButton').textContent =
+      state.muted
+        ? '×'
+        : '◖';
+  };
+
+  $('#crossfade').oninput = (event) => {
+    const seconds =
+      Number(event.target.value);
+
+    $('#crossfadeValue').textContent =
+      `${seconds}s`;
+
+    $('#gaplessChip').textContent =
+      seconds
+        ? 'CROSSFADE ON'
+        : 'GAPLESS ON';
+
+    saveState();
+  };
+
+  $('#visualizerModeButton').onclick = () => {
+    const modes = [
+      'web',
+      'bars',
+      'wave',
+      'off'
+    ];
+
+    state.visualizerMode =
+      modes[
+        (
+          modes.indexOf(
+            state.visualizerMode
+          ) + 1
+        ) % modes.length
+      ];
+
+    $('#visualizerModeButton').textContent =
+      `VISUALIZER · ${state.visualizerMode.toUpperCase()}`;
+
+    toast(
+      state.visualizerMode === 'off'
+        ? 'Visualizer off'
+        : `${state.visualizerMode} visualizer`
+    );
+
+    saveState();
+  };
+}
+
+if (!IS_REACT_UI) {
+$('#eqBands').oninput = (event) => {
+  const input = event.target.closest('input[data-band]');
+  if (!input) return;
+  const index = Number(input.dataset.band);
+  state.eqGains[index] = Number(input.value);
+  input.previousElementSibling.textContent = Number(input.value) > 0 ? `+${input.value}` : input.value;
+  $('#eqPreset').value = 'custom';
+  ensureAudioEngine();
+  applySoundSettings();
+  saveState();
+};
+$('#eqPreset').onchange = (event) => {
+  if (!EQ_PRESETS[event.target.value]) return;
+  state.eqGains = [...EQ_PRESETS[event.target.value]];
+  state.eqEnabled = true;
+  ensureAudioEngine();
+  applySoundSettings();
+  renderEqualizer();
+  saveState();
+};
+$('#eqEnabled').onchange = (event) => {
+  state.eqEnabled = event.target.checked;
+  ensureAudioEngine();
+  applySoundSettings();
+  renderEqualizer();
+  toast(state.eqEnabled ? 'Equalizer enabled' : 'Equalizer bypassed');
+  saveState();
+};
+$('#stereoWidth').oninput = (event) => {
+  const value = Number(event.target.value);
+  state.stereoWidth = value / 100;
+  $('#stereoWidthValue').textContent = value === 0 ? 'MONO' : `${value}%`;
+  ensureAudioEngine();
+  applySoundSettings();
+  saveState();
+};
+$('#stereoBalance').oninput = (event) => {
+  const value = Number(event.target.value);
+  state.stereoBalance = value / 100;
+  $('#stereoBalanceValue').textContent = value === 0 ? 'CENTER' : value < 0 ? `L ${Math.abs(value)}%` : `R ${value}%`;
+  ensureAudioEngine();
+  applySoundSettings();
+  saveState();
+};
+$('#resetSoundButton').onclick = () => {
+  state.eqEnabled = true;
+  state.eqGains = [...EQ_PRESETS.flat];
+  state.stereoWidth = 1;
+  state.stereoBalance = 0;
+  $('#eqPreset').value = 'flat';
+  $('#stereoWidth').value = '100';
+  $('#stereoWidthValue').textContent = '100%';
+  $('#stereoBalance').value = '0';
+  $('#stereoBalanceValue').textContent = 'CENTER';
+  ensureAudioEngine();
+  applySoundSettings();
+  renderEqualizer();
+  toast('Sound settings reset');
+  saveState();
+};
+}
+
+if (!IS_REACT_UI) {
+  decks.forEach((deck) => {
+  applyDeckVolume(deck, deck === decks[0] ? 1 : 0);
+  deck.addEventListener('timeupdate', () => {
+    if (deck !== activeMedia()) return;
+    $('#elapsed').textContent = formatTime(deck.currentTime);
+    $('#duration').textContent = formatTime(deck.duration);
+    if (Number.isFinite(deck.duration)) $('#seek').value = String((deck.currentTime / deck.duration) * 1000 || 0);
+    const seconds = Number($('#crossfade').value);
+    const remaining = deck.duration - deck.currentTime;
+    if (seconds > 0 && remaining > 0 && remaining <= seconds && !state.crossfadeTriggered && !state.transitioning && state.repeat !== 'one') {
+      const target = nextIndex(1);
+      if (target >= 0 && target !== state.currentIndex) {
+        state.crossfadeTriggered = true;
+        void playAt(target, true);
+      }
+    }
+  });
+  deck.addEventListener('play', () => { if (deck === activeMedia()) $('#playButton').textContent = '❚❚'; });
+  deck.addEventListener('pause', () => { if (deck === activeMedia() && !state.transitioning) $('#playButton').textContent = '▶'; });
+  deck.addEventListener('ended', () => {
+    if (deck === activeMedia() && !state.transitioning && !state.crossfadeTriggered) advance(1, true);
+  });
+  deck.addEventListener('error', () => {
+    if (deck === activeMedia() && deck.src) toast('That media format or stream could not be played');
+  });
+  });
+
+  $('#queueList').onclick = (event) => {
+    const button = event.target.closest('button[data-action]');
+    if (!button) return;
+    const row = button.closest('.queue-item');
+    const index = Number(row.dataset.index);
+    const action = button.dataset.action;
+    if (action === 'remove') {
+      if (index === state.currentIndex) {
+        activeMedia().pause();
+        state.currentIndex = -1;
+        updateNowPlaying();
+      } else if (index < state.currentIndex) state.currentIndex -= 1;
+      state.queue.splice(index, 1);
+    } else {
+      const target = action === 'up' ? index - 1 : index + 1;
+      if (target < 0 || target >= state.queue.length) return;
+      [state.queue[index], state.queue[target]] = [state.queue[target], state.queue[index]];
+      if (state.currentIndex === index) state.currentIndex = target;
+      else if (state.currentIndex === target) state.currentIndex = index;
+    }
+    renderQueue();
+  };
+
+  $('#clearQueueButton').onclick = () => {
+    decks.forEach((deck) => { deck.pause(); deck.removeAttribute('src'); deck.load(); deck.classList.remove('active'); });
+    state.queue = [];
+    state.currentIndex = -1;
+    $('#emptyState').classList.remove('hidden');
+    $('#seek').value = '0';
+    $('#elapsed').textContent = '0:00';
+    $('#duration').textContent = '0:00';
+    $('#playButton').textContent = '▶';
+    updateNowPlaying();
+    renderQueue();
+  };
+
+  $('#partyToggle').onchange = (event) => { void setPartyEnabled(event.target.checked); };
+  for (const control of [$('#partyPin'), $('#partyRequestLimit'), $('#partyVoting')]) {
+    control.oninput = () => {
+      state.partyPin = $('#partyPin').value.replace(/\D/g, '').slice(0, 8);
+      $('#partyPin').value = state.partyPin;
+      state.partyRequestLimit = Math.max(5, Math.min(100, Number($('#partyRequestLimit').value) || 40));
+      state.partyVoting = $('#partyVoting').checked;
+      syncPartyState();
+      saveState();
+    };
+  }
+  $('#requestList').onclick = async (event) => {
+    const button = event.target.closest('button[data-request-action]');
+    if (!button) return;
+    const card = button.closest('.request-card');
+    const id = card.dataset.id;
+    const index = state.guestRequests.findIndex((item) => item.id === id);
+    if (index < 0) return;
+    const [item] = state.guestRequests.splice(index, 1);
+    const action = button.dataset.requestAction;
+    await window.spider.resolveRequest(id, action);
+    if (action === 'accept') {
+      state.queue.push({ id: `guest-${item.id}`, title: item.song, artist: item.artist || `Requested by ${item.guest}`, source: 'guest', url: null });
+      renderQueue();
+      toast('Request added—double-click it to find in Spotify');
+    }
+    renderRequests();
+  };
+
+  $('#toggleNearbyButton').onclick = () => { if (state.nearby.active) void stopNearby(); else void startNearby().then(() => toast('Nearby Share is ready')); };
+  $('#miniNearbyButton').onclick = () => { showPanel('nearby'); if (!state.nearby.active) void startNearby(); };
+  $('#shareFilesButton').onclick = async () => {
+    const files = await window.spider.chooseShareFiles();
+    state.sharedFiles.push(...files);
+    renderNearby();
+  };
+  $('#copyNearbyButton').onclick = async () => {
+    if (!state.nearby.active) return;
+    try { await navigator.clipboard.writeText(state.nearby.url); toast('Nearby link copied'); }
+    catch { toast(state.nearby.url); }
+  };
+
+  $('#outputDevice').onchange = (event) => { void applyOutputDevice(event.target.value); };
+  $('#refreshDevicesButton').onclick = () => { void refreshAudioDevices(true); };
+  $('#bluetoothButton').onclick = () => { void window.spider.openBluetooth(); };
+  $('#micToggleButton').onclick = async () => {
+    if (!state.djMic.enabled) await startDjMicrophone();
+    else setDjMicLive(!state.djMic.live);
+  };
+  $('#releaseMicButton').onclick = () => { stopDjMicrophone(); toast('Microphone released'); };
+  $('#refreshMicButton').onclick = () => { void refreshMicrophones(); };
+  $('#micInputDevice').onchange = async (event) => {
+    const wasEnabled = state.djMic.enabled;
+    const wasLive = state.djMic.live;
+    if (wasEnabled) stopDjMicrophone();
+    state.djMic.inputDeviceId = event.target.value;
+    if (wasEnabled && await startDjMicrophone()) setDjMicLive(wasLive);
+    saveState();
+  };
+  $('#micGain').oninput = (event) => {
+    state.djMic.gain = Number(event.target.value) / 100;
+    $('#micGainValue').textContent = `${event.target.value}%`;
+    applyDjMicGain();
+    saveState();
+  };
+  $('#micDuckAmount').oninput = (event) => {
+    state.djMic.duckDb = Number(event.target.value);
+    $('#micDuckValue').textContent = `-${event.target.value} dB`;
+    if (state.djMic.duckingActive) decks.forEach((deck) => applyDeckVolume(deck));
+    saveState();
+  };
+  $('#micDucking').onchange = (event) => {
+    state.djMic.ducking = event.target.checked;
+    if (!state.djMic.ducking) setMicDuckingActive(false);
+    saveState();
+  };
+  $('#micPushToTalk').onchange = (event) => {
+    state.djMic.pushToTalk = event.target.checked;
+    if (state.djMic.enabled && state.djMic.pushToTalk) setDjMicLive(false);
+    renderDjMic();
+    saveState();
+  };
+  $('#micMonitor').onchange = (event) => {
+    if (!state.djMic.enabled) {
+      event.target.checked = false;
+      toast('Enable the microphone first. Use headphones before monitoring.');
+      return;
+    }
+    setDjMicMonitor(event.target.checked);
+    toast(event.target.checked ? 'Mic monitoring on—use headphones to prevent feedback' : 'Mic monitoring off');
+  };
+  for (const eventName of ['pointerdown', 'mousedown', 'touchstart']) {
+    $('#pushToTalkButton').addEventListener(eventName, (event) => { event.preventDefault(); beginPushToTalk(); });
+  }
+  for (const eventName of ['pointerup', 'pointercancel', 'mouseleave', 'mouseup', 'touchend']) {
+    $('#pushToTalkButton').addEventListener(eventName, (event) => { event.preventDefault(); endPushToTalk(); });
+  }
+  window.addEventListener('keydown', (event) => {
+    const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+    if (event.code === 'Space' && state.djMic.pushToTalk && !typing) {
+      event.preventDefault();
+      beginPushToTalk();
+    }
+  });
+  window.addEventListener('keyup', (event) => {
+    if (event.code === 'Space' && state.djMic.pushToTalk) {
+      event.preventDefault();
+      endPushToTalk();
+    }
+  });
+  $('#queueSearch').oninput = (event) => { state.queueSearch = event.target.value.trim().toLocaleLowerCase(); renderQueue(); };
+
+  async function toggleMiniPlayer() {
+    state.miniPlayer = !state.miniPlayer;
+    document.body.classList.toggle('mini-mode', state.miniPlayer);
+    await window.spider.setMiniPlayer(state.miniPlayer);
+    $('#miniPlayerButton').textContent = state.miniPlayer ? 'Full Player' : 'Mini Player';
+  }
+  $('#miniPlayerButton').onclick = toggleMiniPlayer;
+  $('#miniPlayerSettingsButton').onclick = toggleMiniPlayer;
+  $('#startupToggle').onchange = async (event) => {
+    event.target.checked = await window.spider.setStartup(event.target.checked);
+    toast(event.target.checked ? 'Spider will start when you sign in' : 'Startup launch disabled');
+  };
+
+  $('#startBroadcastButton').onclick = startBroadcast;
+  $('#stopBroadcastButton').onclick = stopBroadcast;
+  $('#copyBroadcastButton').onclick = async () => {
+    if (!state.radio.active) return;
+    try { await navigator.clipboard.writeText(state.radio.publicUrl); toast('Broadcast link copied'); }
+    catch { toast(state.radio.publicUrl); }
+  };
+  $('#openBroadcastButton').onclick = () => { if (state.radio.publicUrl) window.open(state.radio.publicUrl); };
+  for (const input of [$('#broadcastName'), $('#broadcastDj'), $('#broadcastDescription')]) {
+    input.oninput = () => { renderRadio(); saveState(); };
+  }
+  $('#broadcastProfiles').onchange = (event) => {
+    if (event.target.value === '') return;
+    const profile = state.radio.profiles[Number(event.target.value)];
+    if (!profile) return;
+    $('#broadcastName').value = profile.name || '';
+    $('#broadcastDj').value = profile.dj || '';
+    $('#broadcastDescription').value = profile.description || '';
+    renderRadio();
+    saveState();
+  };
+
+  $$('[data-service]').forEach((button) => {
+    button.onclick = () => {
+      void window.spider.openService(button.dataset.service);
+      toast(`${button.textContent.trim()} opened in a secure service window`);
+    };
+  });
+
+  $$('.nav-button[data-panel]').forEach((button) => { button.onclick = () => showPanel(button.dataset.panel); });
+  $$('.close-panel').forEach((button) => { button.onclick = () => showPanel('player'); });
+
+  $('#addStreamButton').onclick = () => {
+    const value = $('#streamUrl').value.trim();
+    let url;
+    try { url = new URL(value); } catch { toast('Enter a valid stream URL'); return; }
+    if (!['http:', 'https:'].includes(url.protocol)) { toast('Streams must use HTTP or HTTPS'); return; }
+    const name = $('#streamName').value.trim() || url.hostname;
+    const item = { id: `stream-${Date.now()}`, title: name, name, artist: url.hostname, source: 'network', url: url.href, extension: 'STREAM' };
+    addEntries([item]);
+    showPanel('player');
+  };
+
+  $('#favoriteButton').onclick = () => {
+    $('#favoriteButton').classList.toggle('active');
+    $('#favoriteButton').textContent = $('#favoriteButton').classList.contains('active') ? '♥' : '♡';
+  };
+  $('#aboutButton').onclick = () => $('#aboutModal').classList.remove('hidden');
+  $('#closeAbout').onclick = () => $('#aboutModal').classList.add('hidden');
+  $('#aboutModal').onclick = (event) => { if (event.target === $('#aboutModal')) $('#aboutModal').classList.add('hidden'); };
+
+  window.addEventListener('dragenter', (event) => { event.preventDefault(); dragDepth += 1; $('#dropOverlay').classList.add('show'); });
+  window.addEventListener('dragover', (event) => { event.preventDefault(); });
+  window.addEventListener('dragleave', (event) => { event.preventDefault(); dragDepth -= 1; if (dragDepth <= 0) { dragDepth = 0; $('#dropOverlay').classList.remove('show'); } });
+  window.addEventListener('drop', async (event) => {
+    event.preventDefault();
+    dragDepth = 0;
+    $('#dropOverlay').classList.remove('show');
+    const entries = await window.spider.droppedMedia(event.dataTransfer.files);
+    addEntries(entries);
+  });
+}
+
+if (!IS_REACT_UI) {
+$('#queueList').onclick = (event) => {
+  const button = event.target.closest('button[data-action]');
+  if (!button) return;
+  const row = button.closest('.queue-item');
+  const index = Number(row.dataset.index);
+  const action = button.dataset.action;
+  if (action === 'remove') {
+    if (index === state.currentIndex) {
+      activeMedia().pause();
+      state.currentIndex = -1;
+      updateNowPlaying();
+    } else if (index < state.currentIndex) state.currentIndex -= 1;
+    state.queue.splice(index, 1);
+  } else {
+    const target = action === 'up' ? index - 1 : index + 1;
+    if (target < 0 || target >= state.queue.length) return;
+    [state.queue[index], state.queue[target]] = [state.queue[target], state.queue[index]];
+    if (state.currentIndex === index) state.currentIndex = target;
+    else if (state.currentIndex === target) state.currentIndex = index;
+  }
+  renderQueue();
+};
+
+$('#clearQueueButton').onclick = () => {
+  decks.forEach((deck) => { deck.pause(); deck.removeAttribute('src'); deck.load(); deck.classList.remove('active'); });
+  state.queue = [];
+  state.currentIndex = -1;
+  $('#emptyState').classList.remove('hidden');
+  $('#seek').value = '0';
+  $('#elapsed').textContent = '0:00';
+  $('#duration').textContent = '0:00';
+  $('#playButton').textContent = '▶';
+  updateNowPlaying();
+  renderQueue();
+};
+
+$('#partyToggle').onchange = (event) => { void setPartyEnabled(event.target.checked); };
+for (const control of [$('#partyPin'), $('#partyRequestLimit'), $('#partyVoting')]) {
+  control.oninput = () => {
+    state.partyPin = $('#partyPin').value.replace(/\D/g, '').slice(0, 8);
+    $('#partyPin').value = state.partyPin;
+    state.partyRequestLimit = Math.max(5, Math.min(100, Number($('#partyRequestLimit').value) || 40));
+    state.partyVoting = $('#partyVoting').checked;
+    syncPartyState();
+    saveState();
+  };
+}
+$('#requestList').onclick = async (event) => {
+  const button = event.target.closest('button[data-request-action]');
+  if (!button) return;
+  const card = button.closest('.request-card');
+  const id = card.dataset.id;
+  const index = state.guestRequests.findIndex((item) => item.id === id);
+  if (index < 0) return;
+  const [item] = state.guestRequests.splice(index, 1);
+  const action = button.dataset.requestAction;
+  await window.spider.resolveRequest(id, action);
+  if (action === 'accept') {
+    state.queue.push({ id: `guest-${item.id}`, title: item.song, artist: item.artist || `Requested by ${item.guest}`, source: 'guest', url: null });
+    renderQueue();
+    toast('Request added—double-click it to find in Spotify');
+  }
+  renderRequests();
+};
+
+$('#toggleNearbyButton').onclick = () => { if (state.nearby.active) void stopNearby(); else void startNearby().then(() => toast('Nearby Share is ready')); };
+$('#miniNearbyButton').onclick = () => { showPanel('nearby'); if (!state.nearby.active) void startNearby(); };
+$('#shareFilesButton').onclick = async () => {
+  const files = await window.spider.chooseShareFiles();
+  state.sharedFiles.push(...files);
+  renderNearby();
+};
+$('#copyNearbyButton').onclick = async () => {
+  if (!state.nearby.active) return;
+  try { await navigator.clipboard.writeText(state.nearby.url); toast('Nearby link copied'); }
+  catch { toast(state.nearby.url); }
+};
+
+$('#outputDevice').onchange = (event) => { void applyOutputDevice(event.target.value); };
+$('#refreshDevicesButton').onclick = () => { void refreshAudioDevices(true); };
+$('#bluetoothButton').onclick = () => { void window.spider.openBluetooth(); };
+$('#micToggleButton').onclick = async () => {
+  if (!state.djMic.enabled) await startDjMicrophone();
+  else setDjMicLive(!state.djMic.live);
+};
+$('#releaseMicButton').onclick = () => { stopDjMicrophone(); toast('Microphone released'); };
+$('#refreshMicButton').onclick = () => { void refreshMicrophones(); };
+$('#micInputDevice').onchange = async (event) => {
+  const wasEnabled = state.djMic.enabled;
+  const wasLive = state.djMic.live;
+  if (wasEnabled) stopDjMicrophone();
+  state.djMic.inputDeviceId = event.target.value;
+  if (wasEnabled && await startDjMicrophone()) setDjMicLive(wasLive);
+  saveState();
+};
+$('#micGain').oninput = (event) => {
+  state.djMic.gain = Number(event.target.value) / 100;
+  $('#micGainValue').textContent = `${event.target.value}%`;
+  applyDjMicGain();
+  saveState();
+};
+$('#micDuckAmount').oninput = (event) => {
+  state.djMic.duckDb = Number(event.target.value);
+  $('#micDuckValue').textContent = `-${event.target.value} dB`;
+  if (state.djMic.duckingActive) decks.forEach((deck) => applyDeckVolume(deck));
+  saveState();
+};
+$('#micDucking').onchange = (event) => {
+  state.djMic.ducking = event.target.checked;
+  if (!state.djMic.ducking) setMicDuckingActive(false);
+  saveState();
+};
+$('#micPushToTalk').onchange = (event) => {
+  state.djMic.pushToTalk = event.target.checked;
+  if (state.djMic.enabled && state.djMic.pushToTalk) setDjMicLive(false);
+  renderDjMic();
+  saveState();
+};
+$('#micMonitor').onchange = (event) => {
+  if (!state.djMic.enabled) {
+    event.target.checked = false;
+    toast('Enable the microphone first. Use headphones before monitoring.');
+    return;
+  }
+  setDjMicMonitor(event.target.checked);
+  toast(event.target.checked ? 'Mic monitoring on—use headphones to prevent feedback' : 'Mic monitoring off');
+};
+for (const eventName of ['pointerdown', 'mousedown', 'touchstart']) {
+  $('#pushToTalkButton').addEventListener(eventName, (event) => { event.preventDefault(); beginPushToTalk(); });
+}
+for (const eventName of ['pointerup', 'pointercancel', 'mouseleave', 'mouseup', 'touchend']) {
+  $('#pushToTalkButton').addEventListener(eventName, (event) => { event.preventDefault(); endPushToTalk(); });
+}
+window.addEventListener('keydown', (event) => {
+  const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+  if (event.code === 'Space' && state.djMic.pushToTalk && !typing) {
+    event.preventDefault();
+    beginPushToTalk();
+  }
+});
+window.addEventListener('keyup', (event) => {
+  if (event.code === 'Space' && state.djMic.pushToTalk) {
+    event.preventDefault();
+    endPushToTalk();
+  }
+});
+$('#queueSearch').oninput = (event) => { state.queueSearch = event.target.value.trim().toLocaleLowerCase(); renderQueue(); };
+
+async function toggleMiniPlayer() {
+  state.miniPlayer = !state.miniPlayer;
+  document.body.classList.toggle('mini-mode', state.miniPlayer);
+  await window.spider.setMiniPlayer(state.miniPlayer);
+  $('#miniPlayerButton').textContent = state.miniPlayer ? 'Full Player' : 'Mini Player';
+}
+$('#miniPlayerButton').onclick = toggleMiniPlayer;
+$('#miniPlayerSettingsButton').onclick = toggleMiniPlayer;
+$('#startupToggle').onchange = async (event) => {
+  event.target.checked = await window.spider.setStartup(event.target.checked);
+  toast(event.target.checked ? 'Spider will start when you sign in' : 'Startup launch disabled');
+};
+
+$('#startBroadcastButton').onclick = startBroadcast;
+$('#stopBroadcastButton').onclick = stopBroadcast;
+$('#copyBroadcastButton').onclick = async () => {
+  if (!state.radio.active) return;
+  try { await navigator.clipboard.writeText(state.radio.publicUrl); toast('Broadcast link copied'); }
+  catch { toast(state.radio.publicUrl); }
+};
+$('#openBroadcastButton').onclick = () => { if (state.radio.publicUrl) window.open(state.radio.publicUrl); };
+for (const input of [$('#broadcastName'), $('#broadcastDj'), $('#broadcastDescription')]) {
+  input.oninput = () => { renderRadio(); saveState(); };
+}
+$('#broadcastProfiles').onchange = (event) => {
+  if (event.target.value === '') return;
+  const profile = state.radio.profiles[Number(event.target.value)];
+  if (!profile) return;
+  $('#broadcastName').value = profile.name || '';
+  $('#broadcastDj').value = profile.dj || '';
+  $('#broadcastDescription').value = profile.description || '';
+  renderRadio();
+  saveState();
+};
+
+$$('[data-service]').forEach((button) => {
+  button.onclick = () => {
+    void window.spider.openService(button.dataset.service);
+    toast(`${button.textContent.trim()} opened in a secure service window`);
+  };
+});
+
+$$('.nav-button[data-panel]').forEach((button) => { button.onclick = () => showPanel(button.dataset.panel); });
+$$('.close-panel').forEach((button) => { button.onclick = () => showPanel('player'); });
+
+$('#addStreamButton').onclick = () => {
+  const value = $('#streamUrl').value.trim();
+  let url;
+  try { url = new URL(value); } catch { toast('Enter a valid stream URL'); return; }
+  if (!['http:', 'https:'].includes(url.protocol)) { toast('Streams must use HTTP or HTTPS'); return; }
+  const name = $('#streamName').value.trim() || url.hostname;
+  const item = { id: `stream-${Date.now()}`, title: name, name, artist: url.hostname, source: 'network', url: url.href, extension: 'STREAM' };
+  addEntries([item]);
+  showPanel('player');
+};
+
+$('#favoriteButton').onclick = () => {
+  $('#favoriteButton').classList.toggle('active');
+  $('#favoriteButton').textContent = $('#favoriteButton').classList.contains('active') ? '♥' : '♡';
+};
+$('#aboutButton').onclick = () => $('#aboutModal').classList.remove('hidden');
+$('#closeAbout').onclick = () => $('#aboutModal').classList.add('hidden');
+$('#aboutModal').onclick = (event) => { if (event.target === $('#aboutModal')) $('#aboutModal').classList.add('hidden'); };
+
+window.addEventListener('dragenter', (event) => { event.preventDefault(); dragDepth += 1; $('#dropOverlay').classList.add('show'); });
+window.addEventListener('dragover', (event) => { event.preventDefault(); });
+window.addEventListener('dragleave', (event) => { event.preventDefault(); dragDepth -= 1; if (dragDepth <= 0) { dragDepth = 0; $('#dropOverlay').classList.remove('show'); } });
+window.addEventListener('drop', async (event) => {
+  event.preventDefault();
+  dragDepth = 0;
+  $('#dropOverlay').classList.remove('show');
+  const entries = await window.spider.droppedMedia(event.dataTransfer.files);
+  addEntries(entries);
+});
+}
+}
+
+window.spider.onNearbyEvent((event) => {
+  if (event.type === 'guest-request') {
+    state.guestRequests.push(event.item);
+    renderRequests();
+    toast(`${event.item.guest} requested “${event.item.song}”`);
+  } else if (event.type === 'file-received') {
+    if (event.media) addEntries([event.media], false);
+    toast(`${event.name} received in Downloads › Spider Received`);
+  } else if (event.type === 'party-vote') {
+    const item = state.queue.find((entry) => entry.id === event.id);
+    if (item) {
+      item.votes = event.votes;
+      renderQueue();
+    }
+  } else if (event.type === 'transfer-start' || event.type === 'transfer-progress') {
+    state.transfers.set(event.id, { ...(state.transfers.get(event.id) || {}), ...event });
+    renderTransfers();
+  } else if (event.type === 'transfer-complete' || event.type === 'transfer-error') {
+    const item = { ...(state.transfers.get(event.id) || {}), ...event, progress: event.type === 'transfer-complete' ? 100 : 0, error: event.message || '' };
+    state.transfers.set(event.id, item);
+    renderTransfers();
+    setTimeout(() => { state.transfers.delete(event.id); renderTransfers(); }, 4500);
+  }
+});
+
+window.spider.onRadioEvent((event) => {
+  if (event.type === 'listener-connected') startListenerRecorder(event.id);
+  if (event.type === 'listener-disconnected') stopListenerRecorder(event.id);
+  if (Number.isFinite(event.listenerCount)) state.radio.listenerCount = event.listenerCount;
+  if (event.type === 'stopped') Object.assign(state.radio, { active: false, publicUrl: '', listenerCount: 0 });
+  renderRadio();
+});
+
+window.spider.onOpenMedia((entries) => addEntries(entries));
+
+window.spider.onRemoteCommand(({ command, args = [] } = {}) => {
+  const engine = window.__spiderPlayerEngine;
+  if (!engine || typeof engine[command] !== 'function') return;
+  try {
+    const result = engine[command](...args);
+    if (result && typeof result.then === 'function') void result;
+  } catch (error) {
+    console.error('Remote command failed:', error);
+  }
+});
+
+window.setInterval(() => {
+  if (!window.__spiderPlayerEngine || !window.spider.publishRemoteState) return;
+  window.spider.publishRemoteState({
+    player: {
+      ...window.__spiderPlayerEngine.getSnapshot(),
+      recording: window.__spiderPlayerEngine.isRecording?.() || false,
+    },
+    queue: window.__spiderPlayerEngine.getQueueSnapshot(),
+    radio: state.radio
+  });
+}, 500);
+
+async function initialize() {
+  restoreState();
+  requestAnimationFrame(visualizerFrame);
+  if (IS_REACT_UI) return;
+  const info = await window.spider.appInfo();
+  $('#versionLabel').textContent = `v${info.version}`;
+  $('#aboutVersion').textContent = `Version ${info.version}`;
+  state.nearby = await window.spider.nearbyInfo();
+  renderNearby();
+  renderQueue();
+  renderRequests();
+  renderEqualizer();
+  renderRadioProfiles();
+  renderRadio();
+  renderDjMic();
+  $('#startupToggle').checked = await window.spider.getStartup();
+  updateNowPlaying();
+  void refreshAudioDevices();
+  void refreshMicrophones();
+  if (navigator.mediaDevices?.addEventListener) navigator.mediaDevices.addEventListener('devicechange', () => {
+    void refreshAudioDevices();
+    void refreshMicrophones();
+  });
+  if ('mediaSession' in navigator) {
+    for (const [action, handler] of [
+      ['play', () => { if (activeMedia().paused) togglePlay(); }],
+      ['pause', () => { if (!activeMedia().paused) togglePlay(); }],
+      ['previoustrack', () => advance(-1)],
+      ['nexttrack', () => advance(1)],
+      ['seekbackward', (details) => { activeMedia().currentTime = Math.max(0, activeMedia().currentTime - (details.seekOffset || 10)); }],
+      ['seekforward', (details) => { activeMedia().currentTime = Math.min(activeMedia().duration || Infinity, activeMedia().currentTime + (details.seekOffset || 10)); }]
+    ]) {
+      try { navigator.mediaSession.setActionHandler(action, handler); } catch {}
+    }
+  }
+}
+
+void initialize();

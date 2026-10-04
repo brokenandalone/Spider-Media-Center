@@ -1,0 +1,21 @@
+{
+  "name": "spider-media-center",
+  "version": "1.0.0",
+  "description": "Spider Media Center for Spider OS",
+  "author": {
+    "name": "Spider Media Center",
+    "email": "support@spider-media-player.local"
+  },
+  "desktopName": "spider-media-center",
+  "main": "electron/main.cjs",
+  "private": true,
+  "dependencies": {
+    "music-metadata": "^11.15.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "allowScripts": {
+    "electron-winstaller@5.4.0": true
+  }
+}

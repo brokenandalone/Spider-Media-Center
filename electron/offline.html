@@ -1,0 +1,588 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Spider Media Center</title>
+
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, system-ui, "Segoe UI", sans-serif;
+      --purple: #a855f7;
+      --deep-purple: #6d28d9;
+      --panel: rgba(22, 14, 33, 0.94);
+      --muted: #aa9bb9;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: white;
+      background:
+        radial-gradient(
+          circle at 50% 0%,
+          rgba(126, 34, 206, 0.28),
+          transparent 38rem
+        ),
+        #07050d;
+    }
+
+    button,
+    select,
+    input {
+      font: inherit;
+    }
+
+    button {
+      color: white;
+      background: rgba(91, 33, 182, 0.3);
+      border: 1px solid rgba(168, 85, 247, 0.48);
+      border-radius: 10px;
+      padding: 9px 13px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: rgba(126, 34, 206, 0.56);
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 17px 27px;
+      border-bottom: 1px solid rgba(168, 85, 247, 0.2);
+      background: rgba(7, 5, 13, 0.88);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+    }
+
+    .brand img {
+      width: 43px;
+      height: 43px;
+      filter: drop-shadow(0 0 12px rgba(168, 85, 247, 0.5));
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: 0.13em;
+    }
+
+    .tagline {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .status {
+      margin-right: 10px;
+      color: #fbbf24;
+      font-size: 12px;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 285px;
+      gap: 18px;
+      min-height: calc(100vh - 78px);
+      padding: 20px;
+    }
+
+    .player,
+    .library {
+      border: 1px solid rgba(168, 85, 247, 0.24);
+      border-radius: 16px;
+      background: var(--panel);
+    }
+
+    .player {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .stage {
+      display: grid;
+      flex: 1;
+      min-height: 390px;
+      place-items: center;
+      overflow: hidden;
+      background: #020104;
+    }
+
+    video {
+      display: none;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+    }
+
+    .empty {
+      max-width: 530px;
+      padding: 30px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .empty img {
+      width: 84px;
+      filter: drop-shadow(0 0 25px rgba(168, 85, 247, 0.58));
+    }
+
+    .empty h2 {
+      margin: 15px 0 8px;
+      color: white;
+    }
+
+    .controls {
+      padding: 15px 18px 18px;
+    }
+
+    .seek-row,
+    .button-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .button-row {
+      justify-content: center;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }
+
+    input[type="range"] {
+      flex: 1;
+      accent-color: var(--purple);
+    }
+
+    .round {
+      width: 44px;
+      height: 44px;
+      padding: 0;
+      border-radius: 50%;
+    }
+
+    .play {
+      width: 53px;
+      height: 53px;
+      background:
+        linear-gradient(
+          135deg,
+          var(--purple),
+          var(--deep-purple)
+        );
+    }
+
+    .library {
+      padding: 18px;
+      overflow: auto;
+    }
+
+    ol {
+      padding: 0;
+      list-style: none;
+    }
+
+    li {
+      padding: 11px;
+      color: var(--muted);
+      border-bottom:
+        1px solid rgba(168, 85, 247, 0.13);
+      cursor: pointer;
+    }
+
+    li.active {
+      color: white;
+      background: rgba(126, 34, 206, 0.25);
+    }
+
+    #filePicker {
+      display: none;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <div class="brand">
+      <img src="../assets/icon-512.png" alt="Spider logo" />
+
+      <div>
+        <h1>SPIDER MEDIA CENTER</h1>
+        <div class="tagline">
+          Universal local playback
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <span class="status">
+        OFFLINE LOCAL MODE
+      </span>
+
+      <button id="retry">
+        Retry full player
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <section class="player">
+      <div class="stage">
+        <video id="video"></video>
+
+        <div id="empty" class="empty">
+          <img src="../assets/icon-512.png" alt="" />
+
+          <h2>Drop your media here</h2>
+
+          <p>
+            The online player could not load.
+            Local playback is still available.
+          </p>
+
+          <button id="open">
+            Open media
+          </button>
+        </div>
+      </div>
+
+      <div class="controls">
+        <div id="title">
+          Nothing playing
+        </div>
+
+        <div class="seek-row">
+          <span id="elapsed">0:00</span>
+
+          <input
+            id="seek"
+            type="range"
+            min="0"
+            max="100"
+            value="0"
+          />
+
+          <span id="duration">
+            0:00
+          </span>
+        </div>
+
+        <div class="button-row">
+          <button id="previous" class="round">
+            ⏮
+          </button>
+
+          <button id="back" class="round">
+            −10
+          </button>
+
+          <button id="play" class="round play">
+            ▶
+          </button>
+
+          <button id="forward" class="round">
+            +10
+          </button>
+
+          <button id="next" class="round">
+            ⏭
+          </button>
+
+          <button id="mute" class="round">
+            🔊
+          </button>
+
+          <input
+            id="volume"
+            type="range"
+            min="0"
+            max="1"
+            step=".01"
+            value="1"
+          />
+        </div>
+      </div>
+    </section>
+
+    <aside class="library">
+      <button id="add">
+        Add files
+      </button>
+
+      <ol id="playlist"></ol>
+    </aside>
+  </main>
+
+  <input
+    id="filePicker"
+    type="file"
+    multiple
+    accept="audio/*,video/*,.mkv,.avi,.flac,.m4a,.webm,.mov,.mp4,.mp3,.wav,.ogg"
+  />
+
+  <script>
+    const SPIDER_URL =
+      'https://spider-media-player-tesrtp.v2.appdeploy.ai/';
+
+    const $ = (selector) =>
+      document.querySelector(selector);
+
+    const video = $('#video');
+    const filePicker = $('#filePicker');
+
+    let files = [];
+    let currentIndex = -1;
+    let mediaUrl = null;
+
+    function formatTime(value) {
+      if (!Number.isFinite(value)) {
+        return '0:00';
+      }
+
+      const seconds =
+        Math.floor(value);
+
+      return (
+        Math.floor(seconds / 60) +
+        ':' +
+        String(seconds % 60)
+          .padStart(2, '0')
+      );
+    }
+
+    function renderPlaylist() {
+      const items =
+        files.map((file, index) => {
+          const item =
+            document.createElement('li');
+
+          item.textContent =
+            file.name;
+
+          item.classList.toggle(
+            'active',
+            index === currentIndex
+          );
+
+          item.onclick =
+            () => playIndex(index);
+
+          return item;
+        });
+
+      $('#playlist')
+        .replaceChildren(...items);
+    }
+
+    function playIndex(index) {
+      if (!files[index]) {
+        return;
+      }
+
+      currentIndex = index;
+
+      if (mediaUrl) {
+        URL.revokeObjectURL(mediaUrl);
+      }
+
+      mediaUrl =
+        URL.createObjectURL(
+          files[index]
+        );
+
+      video.src = mediaUrl;
+      video.style.display = 'block';
+
+      $('#empty').style.display =
+        'none';
+
+      $('#title').textContent =
+        files[index].name;
+
+      renderPlaylist();
+
+      void video.play()
+        .catch(() => {});
+    }
+
+    function addFiles(fileList) {
+      const added =
+        [...fileList].filter(
+          (file) =>
+            file.type.startsWith('audio/') ||
+            file.type.startsWith('video/')
+        );
+
+      if (!added.length) {
+        return;
+      }
+
+      files.push(...added);
+      renderPlaylist();
+
+      if (currentIndex === -1) {
+        playIndex(0);
+      }
+    }
+
+    function togglePlay() {
+      if (!video.src) {
+        filePicker.click();
+        return;
+      }
+
+      if (video.paused) {
+        void video.play()
+          .catch(() => {});
+      } else {
+        video.pause();
+      }
+    }
+
+    $('#open').onclick =
+    $('#add').onclick =
+      () => filePicker.click();
+
+    filePicker.onchange = () => {
+      addFiles(filePicker.files);
+      filePicker.value = '';
+    };
+
+    $('#play').onclick =
+      togglePlay;
+
+    $('#back').onclick = () => {
+      video.currentTime =
+        Math.max(
+          0,
+          video.currentTime - 10
+        );
+    };
+
+    $('#forward').onclick = () => {
+      video.currentTime =
+        video.currentTime + 10;
+    };
+
+    $('#previous').onclick = () => {
+      if (!files.length) return;
+
+      playIndex(
+        (
+          currentIndex - 1 +
+          files.length
+        ) % files.length
+      );
+    };
+
+    $('#next').onclick = () => {
+      if (!files.length) return;
+
+      playIndex(
+        (
+          currentIndex + 1
+        ) % files.length
+      );
+    };
+
+    $('#mute').onclick = () => {
+      video.muted =
+        !video.muted;
+
+      $('#mute').textContent =
+        video.muted
+          ? '🔇'
+          : '🔊';
+    };
+
+    $('#volume').oninput =
+      (event) => {
+        video.volume =
+          Number(
+            event.target.value
+          );
+      };
+
+    $('#retry').onclick =
+      () => {
+        location.href =
+          SPIDER_URL;
+      };
+
+    $('#seek').oninput = () => {
+      if (
+        !Number.isFinite(
+          video.duration
+        )
+      ) {
+        return;
+      }
+
+      video.currentTime =
+        (
+          Number(
+            $('#seek').value
+          ) / 100
+        ) * video.duration;
+    };
+
+    video.ontimeupdate = () => {
+      $('#elapsed').textContent =
+        formatTime(
+          video.currentTime
+        );
+
+      if (
+        Number.isFinite(
+          video.duration
+        )
+      ) {
+        $('#seek').value =
+          String(
+            (
+              video.currentTime /
+              video.duration
+            ) * 100
+          );
+      }
+    };
+
+    video.onloadedmetadata = () => {
+      $('#duration').textContent =
+        formatTime(
+          video.duration
+        );
+    };
+
+    video.onplay = () => {
+      $('#play').textContent =
+        '❚❚';
+    };
+
+    video.onpause = () => {
+      $('#play').textContent =
+        '▶';
+    };
+
+    video.onended = () => {
+      if (files.length > 1) {
+        $('#next').click();
+      }
+    };
+  </script>
+</body>
+</html>

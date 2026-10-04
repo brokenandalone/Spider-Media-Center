@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: file:; media-src 'self' file: blob: http: https:; style-src 'self'; script-src 'self'; connect-src 'self' http: https:;">
+  <title>Spider Media Center</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="noise" aria-hidden="true"></div>
+  <div id="dropOverlay" class="drop-overlay"><div>Drop media into the web</div></div>
+
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark"><img src="../assets/icon-512.png" alt=""></div>
+        <div>
+          <h1>SPIDER <span>MEDIA PLAYER</span></h1>
+          <p>EVERY SOUND. ONE WEB.</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <div class="live-pill" id="radioIndicator"><i></i> RADIO OFF</div>
+        <div class="live-pill" id="partyIndicator"><i></i> PARTY OFF</div>
+        <button class="ghost-button" id="miniPlayerButton" type="button">Mini Player</button>
+        <button class="ghost-button" id="miniNearbyButton" type="button">Nearby Share</button>
+        <button class="avatar" id="aboutButton" type="button" aria-label="About Spider">S</button>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <aside class="sidebar">
+        <nav>
+          <section class="nav-section">
+            <h2>LIBRARY</h2>
+            <button class="nav-button active" data-panel="player" type="button"><span>◉</span> Now Playing</button>
+            <button class="nav-button" id="addMediaNav" type="button"><span>＋</span> Add Local Media</button>
+            <button class="nav-button" id="addFolderNav" type="button"><span>▣</span> Add Music Folder</button>
+          </section>
+
+          <section class="nav-section">
+            <h2>SPIDER RADIO</h2>
+            <button class="nav-button" data-panel="radio" type="button"><span>◉</span> Broadcast Studio</button>
+          </section>
+
+          <section class="nav-section">
+            <h2>SERVICES</h2>
+            <button class="nav-button service-link" data-service="spotify" type="button"><b class="service-dot spotify">S</b> Spotify <em>↗</em></button>
+            <button class="nav-button service-link" data-service="appleMusic" type="button"><b class="service-dot apple">♪</b> Apple Music <em>↗</em></button>
+            <button class="nav-button service-link" data-service="appleTv" type="button"><b class="service-dot tv"></b> Apple TV <em>↗</em></button>
+            <button class="nav-button" data-panel="streams" type="button"><span>≋</span> Network Streams</button>
+          </section>
+
+          <section class="nav-section">
+            <h2>DEVICES</h2>
+            <button class="nav-button" data-panel="sound" type="button"><span>≋</span> EQ & Stereo</button>
+            <button class="nav-button" data-panel="devices" type="button"><span>ᛒ</span> Bluetooth</button>
+            <button class="nav-button" data-panel="nearby" type="button"><span>⌁</span> Nearby Share</button>
+            <button class="nav-button" data-panel="devices" type="button"><span>◖</span> Output Device</button>
+          </section>
+        </nav>
+
+        <div class="sidebar-foot">
+          <span id="libraryCount">0 tracks</span>
+          <span id="versionLabel">v1.0.0</span>
+        </div>
+      </aside>
+
+      <main class="main-stage">
+        <section class="hero-player">
+          <div class="media-stage" id="mediaStage">
+            <video id="deckA" playsinline></video>
+            <video id="deckB" playsinline></video>
+            <canvas id="visualizerCanvas" aria-label="Audio visualizer"></canvas>
+            <div class="empty-state" id="emptyState">
+              <img src="../assets/icon-512.png" alt="Purple distressed Spider Media Center mark">
+              <div class="web-lines" aria-hidden="true"></div>
+              <p>THE WEB IS QUIET</p>
+              <h2>Drop audio or video here</h2>
+              <button class="primary-button" id="openMediaButton" type="button">Add media</button>
+            </div>
+            <div class="now-badge" id="sourceBadge">LOCAL</div>
+            <button class="visualizer-mode" id="visualizerModeButton" type="button" title="Change visualizer mode">VISUALIZER · WEB</button>
+          </div>
+
+          <div class="transport">
+            <div class="track-heading">
+              <div>
+                <span class="eyebrow">NOW PLAYING</span>
+                <h2 id="trackTitle">Nothing playing</h2>
+                <p id="trackMeta">Add local media or a network stream</p>
+              </div>
+              <button class="icon-button" id="favoriteButton" type="button" aria-label="Favorite">♡</button>
+            </div>
+
+            <div class="seek-line">
+              <span id="elapsed">0:00</span>
+              <input id="seek" type="range" min="0" max="1000" value="0" aria-label="Seek">
+              <span id="duration">0:00</span>
+            </div>
+
+            <div class="transport-row">
+              <button class="mode-button" id="shuffleButton" type="button" title="Shuffle">⇄<small>SHUFFLE</small></button>
+              <button class="round-button" id="previousButton" type="button" title="Previous">‹▌</button>
+              <button class="round-button" id="backButton" type="button" title="Back 10 seconds">−10</button>
+              <button class="play-button" id="playButton" type="button" title="Play">▶</button>
+              <button class="round-button" id="forwardButton" type="button" title="Forward 10 seconds">+10</button>
+              <button class="round-button" id="nextButton" type="button" title="Next">▌›</button>
+              <button class="mode-button" id="repeatButton" type="button" title="Repeat">↻<small>OFF</small></button>
+            </div>
+
+            <div class="utility-row">
+              <button class="small-icon" id="muteButton" type="button" aria-label="Mute">◖</button>
+              <input id="volume" type="range" min="0" max="100" value="82" aria-label="Volume">
+              <div class="divider"></div>
+              <label for="crossfade">Crossfade <strong id="crossfadeValue">4s</strong></label>
+              <input id="crossfade" type="range" min="0" max="12" value="4" aria-label="Crossfade seconds">
+              <span class="gapless-chip" id="gaplessChip">GAPLESS ON</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="feature-panel hidden" id="streamsPanel">
+          <div class="panel-heading"><div><span class="eyebrow">SERVICES</span><h2>Network Streams</h2></div><button class="close-panel" type="button">×</button></div>
+          <p class="panel-copy">Play a direct HTTP or HTTPS audio/video stream. Paste a station, podcast, or media stream URL.</p>
+          <div class="form-card">
+            <label for="streamName">Name</label><input id="streamName" placeholder="Late Night Radio">
+            <label for="streamUrl">Stream URL</label><input id="streamUrl" type="url" placeholder="https://example.com/live.mp3">
+            <button class="primary-button" id="addStreamButton" type="button">Add & play stream</button>
+          </div>
+          <div class="service-grid">
+            <button data-service="spotify" type="button"><b class="service-dot spotify">S</b><span><strong>Spotify</strong><small>Open web player</small></span><em>↗</em></button>
+            <button data-service="appleMusic" type="button"><b class="service-dot apple">♪</b><span><strong>Apple Music</strong><small>Open web player</small></span><em>↗</em></button>
+            <button data-service="appleTv" type="button"><b class="service-dot tv"></b><span><strong>Apple TV</strong><small>Open service</small></span><em>↗</em></button>
+          </div>
+        </section>
+
+        <section class="feature-panel hidden" id="devicesPanel">
+          <div class="panel-heading"><div><span class="eyebrow">DEVICES</span><h2>Sound & Bluetooth</h2></div><button class="close-panel" type="button">×</button></div>
+          <div class="device-card">
+            <div class="device-icon">◖</div><div><h3>Output device</h3><p>Switch playback without leaving Spider.</p></div>
+            <select id="outputDevice"><option value="default">System default</option></select>
+            <button class="ghost-button" id="refreshDevicesButton" type="button">Refresh</button>
+          </div>
+          <div class="device-card">
+            <div class="device-icon">ᛒ</div><div><h3>Bluetooth</h3><p>Pair speakers or headphones in Windows, then select them above.</p></div>
+            <button class="primary-button" id="bluetoothButton" type="button">Open Bluetooth settings</button>
+          </div>
+          <div class="device-card">
+            <div class="device-icon">⚙</div><div><h3>Windows behavior</h3><p>Keep Spider close at hand and restore your saved library automatically.</p></div>
+            <label class="setting-check"><input id="startupToggle" type="checkbox"> Start Spider when I sign in</label>
+            <button class="ghost-button" id="miniPlayerSettingsButton" type="button">Toggle mini player</button>
+          </div>
+          <div class="notice"><b>Actual device switching</b><span>Spider uses Windows/Chromium audio routing. A newly paired device may take a moment to appear.</span></div>
+        </section>
+
+        <section class="feature-panel hidden" id="soundPanel">
+          <div class="panel-heading"><div><span class="eyebrow">SOUND</span><h2>Equalizer & Stereo</h2></div><button class="close-panel" type="button">×</button></div>
+          <div class="sound-toolbar">
+            <div><label for="eqPreset">EQ preset</label><select id="eqPreset"><option value="flat">Flat</option><option value="bass">Bass boost</option><option value="vocal">Vocal clarity</option><option value="rock">Rock</option><option value="night">Night</option><option value="custom">Custom</option></select></div>
+            <label class="bypass-toggle"><input id="eqEnabled" type="checkbox" checked><span>EQ enabled</span></label>
+            <button class="ghost-button" id="resetSoundButton" type="button">Reset sound</button>
+          </div>
+          <div class="equalizer-card">
+            <div class="eq-scale"><span>+12</span><span>0 dB</span><span>−12</span></div>
+            <div class="eq-bands" id="eqBands"></div>
+          </div>
+          <div class="stereo-grid">
+            <div class="stereo-card"><div class="stereo-heading"><div class="device-icon">◐</div><div><h3>Stereo image</h3><p>Collapse to mono or widen the soundstage.</p></div></div><input id="stereoWidth" type="range" min="0" max="200" value="100"><div class="range-labels"><span>MONO</span><strong id="stereoWidthValue">100%</strong><span>WIDE</span></div></div>
+            <div class="stereo-card"><div class="stereo-heading"><div class="device-icon">↔</div><div><h3>Stereo balance</h3><p>Shift the output between left and right.</p></div></div><input id="stereoBalance" type="range" min="-100" max="100" value="0"><div class="range-labels"><span>LEFT</span><strong id="stereoBalanceValue">CENTER</strong><span>RIGHT</span></div></div>
+          </div>
+          <div class="notice"><b>Live audio processing</b><span>The equalizer and stereo matrix run locally through the desktop audio engine and apply to local files and network streams.</span></div>
+        </section>
+
+        <section class="feature-panel hidden" id="nearbyPanel">
+          <div class="panel-heading"><div><span class="eyebrow">DEVICES</span><h2>Nearby Share</h2></div><button class="close-panel" type="button">×</button></div>
+          <div class="nearby-layout">
+            <div class="qr-card"><div class="qr-placeholder" id="qrPlaceholder">START<br>SHARING</div><img id="qrImage" alt="Nearby Share QR code"><span>Scan on iPhone or Android</span></div>
+            <div class="nearby-info">
+              <h3>Share across your local Wi-Fi</h3>
+              <p>Phones can send files, download files you share, and submit Party DJ requests—no mobile app required.</p>
+              <div class="share-code"><span id="nearbyUrl">Nearby Share is off</span><button id="copyNearbyButton" type="button">Copy</button></div>
+              <div class="button-pair"><button class="primary-button" id="toggleNearbyButton" type="button">Start Nearby Share</button><button class="ghost-button" id="shareFilesButton" type="button" disabled>Choose files to share</button></div>
+              <div class="transfer-activity" id="transferActivity"></div>
+              <div class="shared-files" id="sharedFiles"><span>No files shared from this PC.</span></div>
+            </div>
+          </div>
+          <div class="privacy-note">Nearby Share is available only while Spider is open. The unguessable QR link protects this session; use a trusted Wi-Fi network.</div>
+        </section>
+
+        <section class="feature-panel hidden" id="radioPanel">
+          <div class="panel-heading"><div><span class="eyebrow">SPIDER RADIO</span><h2>Broadcast Studio</h2></div><button class="close-panel" type="button">×</button></div>
+          <div class="radio-status-card">
+            <div class="radio-orb"><i></i><span>LIVE</span></div>
+            <div><h3 id="radioStatusTitle">Ready to broadcast</h3><p id="radioStatusCopy">Your processed Spider audio—EQ, stereo image, crossfades and all—streams to listeners through a public link.</p></div>
+            <strong id="listenerCount">0 LISTENERS</strong>
+          </div>
+          <section class="dj-mic-console" aria-label="DJ microphone console">
+            <div class="dj-mic-heading">
+              <div><span class="eyebrow">DJ MICROPHONE</span><h3>Talk live over the music</h3></div>
+              <strong id="micStatus">MIC OFF</strong>
+            </div>
+            <div class="mic-controls">
+              <label>Microphone<select id="micInputDevice"><option value="default">System default microphone</option></select></label>
+              <button class="ghost-button" id="refreshMicButton" type="button">Refresh mics</button>
+              <label>Mic gain <output id="micGainValue">100%</output><input id="micGain" type="range" min="0" max="200" value="100"></label>
+              <label>Music duck <output id="micDuckValue">-14 dB</output><input id="micDuckAmount" type="range" min="0" max="24" value="14"></label>
+              <label class="mic-check"><input id="micDucking" type="checkbox" checked> Lower music while I talk</label>
+              <label class="mic-check"><input id="micPushToTalk" type="checkbox"> Spacebar push-to-talk</label>
+              <label class="mic-check mic-monitor"><input id="micMonitor" type="checkbox"> Hear my mic locally <small>Headphones only</small></label>
+              <div class="mic-meter-wrap"><span>VOICE LEVEL</span><div class="mic-meter" id="micMeter"><i></i></div></div>
+            </div>
+            <div class="mic-actions">
+              <button class="primary-button" id="micToggleButton" type="button">Enable microphone</button>
+              <button class="talk-button" id="pushToTalkButton" type="button" disabled>HOLD TO TALK</button>
+              <button class="ghost-button hidden" id="releaseMicButton" type="button">Release microphone</button>
+              <span>When push-to-talk is enabled, hold Space or the talk button. Use headphones before turning on monitoring.</span>
+            </div>
+          </section>
+          <div class="broadcast-grid">
+            <div class="form-card radio-form">
+              <label for="broadcastName">Broadcast name</label><input id="broadcastName" maxlength="80" placeholder="Midnight Spider Radio">
+              <label for="broadcastDj">DJ / host name</label><input id="broadcastDj" maxlength="60" placeholder="DJ Spider">
+              <label for="broadcastDescription">Description</label><textarea id="broadcastDescription" maxlength="220" placeholder="Tonight's live set…"></textarea>
+              <label for="broadcastProfiles">Saved broadcasts</label><select id="broadcastProfiles"><option value="">New broadcast</option></select>
+              <label class="rights-check"><input id="broadcastRights" type="checkbox"><span>I have permission to broadcast this content.</span></label>
+              <div class="radio-buttons"><button class="primary-button" id="startBroadcastButton" type="button">Start public broadcast</button><button class="ghost-button hidden" id="stopBroadcastButton" type="button">Stop broadcast</button></div>
+            </div>
+            <div class="listener-preview">
+              <img src="../assets/icon-512.png" alt="Spider Radio">
+              <span class="eyebrow">PUBLIC LISTENER LINK</span>
+              <h3 id="listenerPreviewName">Your station name</h3>
+              <p id="listenerPreviewNow">Nothing playing</p>
+              <div class="broadcast-qr"><img class="hidden" id="broadcastQr" alt="Broadcast QR code"><div id="broadcastQrPlaceholder">QR APPEARS<br>WHEN LIVE</div></div>
+              <div class="share-code"><span id="broadcastUrl">Link appears when live</span><button id="copyBroadcastButton" type="button">Copy</button></div>
+              <button class="ghost-button" id="openBroadcastButton" type="button" disabled>Open listener page</button>
+            </div>
+          </div>
+          <div class="privacy-note">The public link exists only while Spider and this broadcast are running. Spider uses an outbound encrypted relay; no router port-forwarding is required. Short-lived relay URLs are intended for personal shows and testing, not a permanent station address.</div>
+        </section>
+      </main>
+
+      <aside class="queue-panel">
+        <div class="party-header">
+          <div><span class="eyebrow">LIVE SESSION</span><h2>Party DJ Mode</h2></div>
+          <label class="switch"><input id="partyToggle" type="checkbox"><span></span></label>
+        </div>
+        <p class="party-copy" id="partyCopy">Turn on guest requests and a live shared queue.</p>
+
+        <div class="party-settings hidden" id="partySettings">
+          <label>PIN <input id="partyPin" inputmode="numeric" maxlength="8" placeholder="Optional"></label>
+          <label>Limit <input id="partyRequestLimit" type="number" min="5" max="100" value="40"></label>
+          <label class="vote-setting"><input id="partyVoting" type="checkbox" checked> Voting</label>
+        </div>
+
+        <div class="requests hidden" id="requestsArea">
+          <div class="section-title"><h3>Guest requests</h3><span id="requestCount">0</span></div>
+          <div id="requestList" class="request-list"><p class="empty-list">Waiting for requests…</p></div>
+        </div>
+
+        <div class="section-title"><h3>Up next</h3><button id="clearQueueButton" type="button">Clear</button></div>
+        <input class="queue-search" id="queueSearch" type="search" placeholder="Search queue…">
+        <div class="queue-list" id="queueList"><div class="empty-list">Your queue is empty.<br>Add media to begin.</div></div>
+        <button class="add-media-wide" id="addMediaQueue" type="button">＋ Add media</button>
+      </aside>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status"></div>
+  <div class="modal-backdrop hidden" id="aboutModal">
+    <div class="modal"><button class="modal-close" id="closeAbout" type="button">×</button><img src="../assets/icon-512.png" alt=""><span class="eyebrow">SPIDER MEDIA CENTER</span><h2>Every sound. One web.</h2><p>Local playback, service launchers, Party DJ Mode, device routing, and private nearby sharing—inside the actual Windows desktop app.</p><small id="aboutVersion">Version 1.0.0</small></div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

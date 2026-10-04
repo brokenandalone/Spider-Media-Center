@@ -233,7 +233,6 @@
   function syncBcnControls() {
     ensureAutoDjControl();
     syncConnectionCard();
-    wireRadioDiagnostics();
   }
 
   function buildPanel() {
@@ -423,30 +422,96 @@
 
   }
 
+  function ensureTalkToSpiderControl() {
+    const voice = document.querySelector('.voice-assistant');
+    if (!voice) return;
+
+    let button = document.getElementById('talkToSpiderLauncher');
+    if (!button) {
+      button = el('button', {
+        id: 'talkToSpiderLauncher',
+        type: 'button',
+        text: 'TALK TO SPIDER'
+      });
+      button.addEventListener('click', () => {
+        const opening = !voice.classList.contains('spider-voice-open');
+        voice.classList.toggle('spider-voice-open', opening);
+        button.textContent = opening ? 'CLOSE SPIDER VOICE' : 'TALK TO SPIDER';
+        if (opening) {
+          window.setTimeout(() => voice.querySelector('input')?.focus(), 50);
+        }
+      });
+      document.body.append(button);
+    }
+  }
+
+  function ensureFloatingAutoDjControl() {
+    const dj = window.__spiderAutoDJ;
+    const bridge = window.__spiderPlayerBridge;
+    if (!dj || !bridge) return;
+
+    let button = document.getElementById('floatingAutoDjButton');
+    if (!button) {
+      button = el('button', {
+        id: 'floatingAutoDjButton',
+        type: 'button'
+      });
+
+      button.addEventListener('click', () => {
+        try {
+          if (dj.isRunning()) {
+            dj.stop();
+          } else {
+            let playlist = dj.listPlaylists().find((item) => item?.tracks?.length);
+            if (!playlist) {
+              const queue = bridge.getQueueSnapshot?.()?.queue || [];
+              if (!queue.length) {
+                alert('AutoDJ needs at least one track in the current queue.');
+                return;
+              }
+              playlist = dj.createPlaylist('BCN Auto Queue');
+              dj.savePlaylist({
+                ...playlist,
+                tracks: queue.map((item) => ({
+                  ...item,
+                  weight: 1,
+                  kind: item.kind || 'music'
+                }))
+              });
+            }
+            dj.start(playlist.id);
+          }
+          button.textContent = dj.isRunning() ? 'STOP AUTO DJ' : 'START AUTO DJ';
+        } catch (error) {
+          alert(`AutoDJ could not start: ${error?.message || error}`);
+        }
+      });
+
+      document.body.append(button);
+    }
+
+    const label = dj.isRunning() ? 'STOP AUTO DJ' : 'START AUTO DJ';
+    if (button.textContent !== label) button.textContent = label;
+  }
+
+  function lightSync() {
+    buildPanel();
+    ensureTalkToSpiderControl();
+    ensureFloatingAutoDjControl();
+    syncConnectionCard();
+  }
+
   const boot = () => {
     buildPanel();
     replaceBranding(document.getElementById('root'));
-    syncBcnControls();
-    window.setInterval(syncBcnControls, 500);
+    lightSync();
+
+    // Poll instead of observing React DOM mutations. This avoids the
+    // feedback-loop that previously produced a black renderer.
+    window.setInterval(lightSync, 1000);
+    window.setTimeout(() => replaceBranding(document.getElementById('root')), 2500);
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
   else boot();
-
-  let syncScheduled = false;
-  const scheduleSync = () => {
-    if (syncScheduled) return;
-    syncScheduled = true;
-    window.requestAnimationFrame(() => {
-      syncScheduled = false;
-      buildPanel();
-      replaceBranding(document.getElementById('root'));
-      syncBcnControls();
-    });
-  };
-
-  const observer = new MutationObserver(scheduleSync);
-
-  const root = document.getElementById('root');
-  if (root) observer.observe(root, { subtree: true, childList: true });
 })();

@@ -221,24 +221,38 @@
     const rights = el('input', { type: 'checkbox' });
     rights.addEventListener('change', () => { state.rightsConfirmed = rights.checked; });
 
-    const youtubeUrl = el('input', {
+    const webUrl = el('input', {
       type: 'url',
-      placeholder: 'https://www.youtube.com/watch?v=…'
+      placeholder: 'https://example.com/'
     });
-    const youtubeNative = el('button', {
+    const openWebsite = el('button', {
       type: 'button',
       className: 'bcn-primary',
-      text: 'Queue YouTube URL',
+      text: 'Open website',
+      onclick: async () => {
+        const url = String(webUrl.value || '').trim();
+        if (!url) return;
+        try {
+          await window.spider.openWebPage(url);
+        } catch (error) {
+          alert(error.message);
+        }
+      }
+    });
+    const playDirect = el('button', {
+      type: 'button',
+      className: 'bcn-small-button',
+      text: 'Play direct stream',
       onclick: () => {
-        const url = String(youtubeUrl.value || '').trim();
+        const url = String(webUrl.value || '').trim();
         if (!url) return;
         try {
           enqueueNetwork({
-            id: `youtube-${Date.now()}`,
-            title: 'YouTube stream',
+            id: `web-stream-${Date.now()}`,
+            title: 'Web stream',
             url,
             source: 'network',
-            extension: 'YOUTUBE'
+            extension: 'STREAM'
           });
         } catch (error) {
           alert(error.message);
@@ -272,7 +286,7 @@
         ),
         engineStatus
       ),
-      el('p', { className: 'bcn-muted', text: 'Search world radio, load IPTV, use VLC compatibility, and cue permitted sources into the BCN broadcast mix.' }),
+      el('p', { className: 'bcn-muted', text: 'Search world radio, load IPTV, open web-media sites, and cue permitted direct streams into the BCN broadcast mix.' }),
       el('div', { className: 'bcn-rights' },
         rights,
         el('span', { text: ' I have permission to rebroadcast sources I cue into BCN.' })
@@ -290,9 +304,9 @@
         iptvResults
       ),
       el('div', { className: 'bcn-section' },
-        el('h3', { text: 'YouTube / web media' }),
-        el('p', { className: 'bcn-muted', text: 'Queue a normal YouTube URL for the Spider native engine. This branch does not add DRM, paywall or ad-circumvention code.' }),
-        el('div', { className: 'bcn-row' }, youtubeUrl, youtubeNative)
+        el('h3', { text: 'Web Media' }),
+        el('p', { className: 'bcn-muted', text: 'Use Open website for a normal web page. Use Play direct stream only for an actual audio/video stream URL such as MP3, AAC, HLS/M3U8 or a direct media endpoint. A normal website URL is not itself a media stream.' }),
+        el('div', { className: 'bcn-row' }, webUrl, openWebsite, playDirect)
       ),
       el('div', { className: 'bcn-section' },
         el('h3', { text: 'Portable AI DJ' }),

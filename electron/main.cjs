@@ -16,7 +16,6 @@ const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const QRCode = require('qrcode');
-const { getVlcInfo, playExternal } = require('./vlc-engine.cjs');
 const {
   IPTV_DEFAULT_PLAYLIST,
   loadIptvPlaylist,
@@ -1144,8 +1143,6 @@ ipcMain.handle('media:choose-folder', async () => {
   return await safeMediaEntries(mediaFilesInFolder(result.filePaths[0]));
 });
 ipcMain.handle('media:from-paths', async (_event, paths) => await safeMediaEntries(Array.isArray(paths) ? paths : []));
-ipcMain.handle('media:vlc-info', () => getVlcInfo());
-ipcMain.handle('media:vlc-play', (_event, url, options) => playExternal(url, options || {}));
 ipcMain.handle('iptv:load', (_event, url) => loadIptvPlaylist(url || IPTV_DEFAULT_PLAYLIST));
 ipcMain.handle('radio:directory-search', (_event, options) => searchRadioStations(options || {}));
 ipcMain.handle('dj:portable-info', () => findPortableDj());

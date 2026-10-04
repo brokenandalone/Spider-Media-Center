@@ -1,7 +1,7 @@
 #bcnMediaLauncher {
   position: fixed;
   right: 18px;
-  bottom: 18px;
+  top: 92px;
   z-index: 2147483000;
   border: 1px solid rgba(190, 118, 255, .55);
   border-radius: 999px;

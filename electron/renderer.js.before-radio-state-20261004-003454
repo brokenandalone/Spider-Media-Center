@@ -2477,13 +2477,7 @@ window.__spiderPlayerEngine = {
   stopRadio: async () => {
     for (const id of state.radio.recorders.keys()) stopListenerRecorder(id);
     await window.spider.stopRadio();
-    Object.assign(state.radio, {
-    active: false,
-    publicUrl: '',
-    qrDataUrl: '',
-    listenerCount: 0,
-    connectionStatus: 'offline'
-  });
+    Object.assign(state.radio, { active: false, publicUrl: '', listenerCount: 0 });
     return { publicUrl: '', listenerCount: 0, active: false };
   },
   getRadioState: () => ({ active: state.radio.active, publicUrl: state.radio.publicUrl, listenerCount: state.radio.listenerCount })
@@ -2500,22 +2494,10 @@ function renderRadioProfiles() {
 }
 
 function renderRadio() {
-  const live = Boolean(
-    state.radio.active ||
-    state.radio.publicUrl ||
-    state.radio.qrDataUrl
-  );
-
-  const radioIndicator = $('#radioIndicator');
-
-  if (radioIndicator) {
-    radioIndicator.classList.toggle('on', live);
-    radioIndicator.innerHTML = live
-      ? '<i></i> RADIO LIVE'
-      : '<i></i> RADIO OFF';
-  }
-
   if (IS_REACT_UI) return;
+  const live = state.radio.active;
+  $('#radioIndicator').classList.toggle('on', live);
+  $('#radioIndicator').innerHTML = live ? '<i></i> RADIO LIVE' : '<i></i> RADIO OFF';
   $('.radio-status-card').classList.toggle('live', live);
   $('#radioStatusTitle').textContent = live ? $('#broadcastName').value || 'Spider Radio' : 'Ready to broadcast';
   $('#radioStatusCopy').textContent = live ? 'Your processed Spider audio is live on the public internet.' : 'Your processed Spider audio—EQ, stereo image, crossfades and all—streams to listeners through a public link.';
@@ -2626,13 +2608,7 @@ async function startBroadcast() {
 async function stopBroadcast() {
   for (const id of state.radio.recorders.keys()) stopListenerRecorder(id);
   await window.spider.stopRadio();
-  Object.assign(state.radio, {
-    active: false,
-    publicUrl: '',
-    qrDataUrl: '',
-    listenerCount: 0,
-    connectionStatus: 'offline'
-  });
+  Object.assign(state.radio, { active: false, publicUrl: '', listenerCount: 0 });
   renderRadio();
   toast('Broadcast stopped');
 }
@@ -3698,35 +3674,10 @@ window.spider.onNearbyEvent((event) => {
 });
 
 window.spider.onRadioEvent((event) => {
-  if (!event || typeof event !== 'object') return;
-
-  if (event.type === 'live' && event.state) {
-    Object.assign(state.radio, event.state, {
-      active: true
-    });
-  }
-
-  if (event.type === 'listener-connected') {
-    startListenerRecorder(event.id);
-  }
-
-  if (event.type === 'listener-disconnected') {
-    stopListenerRecorder(event.id);
-  }
-
-  if (Number.isFinite(event.listenerCount)) {
-    state.radio.listenerCount = event.listenerCount;
-  }
-
-  if (event.type === 'stopped') {
-    Object.assign(state.radio, {
-      active: false,
-      publicUrl: '',
-      qrDataUrl: '',
-      listenerCount: 0
-    });
-  }
-
+  if (event.type === 'listener-connected') startListenerRecorder(event.id);
+  if (event.type === 'listener-disconnected') stopListenerRecorder(event.id);
+  if (Number.isFinite(event.listenerCount)) state.radio.listenerCount = event.listenerCount;
+  if (event.type === 'stopped') Object.assign(state.radio, { active: false, publicUrl: '', listenerCount: 0 });
   renderRadio();
 });
 

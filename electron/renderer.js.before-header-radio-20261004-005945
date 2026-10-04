@@ -2500,22 +2500,10 @@ function renderRadioProfiles() {
 }
 
 function renderRadio() {
-  const live = Boolean(
-    state.radio.active ||
-    state.radio.publicUrl ||
-    state.radio.qrDataUrl
-  );
-
-  const radioIndicator = $('#radioIndicator');
-
-  if (radioIndicator) {
-    radioIndicator.classList.toggle('on', live);
-    radioIndicator.innerHTML = live
-      ? '<i></i> RADIO LIVE'
-      : '<i></i> RADIO OFF';
-  }
-
   if (IS_REACT_UI) return;
+  const live = state.radio.active;
+  $('#radioIndicator').classList.toggle('on', live);
+  $('#radioIndicator').innerHTML = live ? '<i></i> RADIO LIVE' : '<i></i> RADIO OFF';
   $('.radio-status-card').classList.toggle('live', live);
   $('#radioStatusTitle').textContent = live ? $('#broadcastName').value || 'Spider Radio' : 'Ready to broadcast';
   $('#radioStatusCopy').textContent = live ? 'Your processed Spider audio is live on the public internet.' : 'Your processed Spider audio—EQ, stereo image, crossfades and all—streams to listeners through a public link.';

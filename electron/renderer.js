@@ -425,6 +425,26 @@ function playable(item) {
   return Boolean(item && item.url);
 }
 
+function isVideoItem(item) {
+  if (!item) return false;
+  const extension = String(item.extension || '').toLowerCase();
+  if (['mp4', 'mkv', 'mov', 'webm', 'avi', 'mpeg', 'mpg', 'wmv', 'm4v'].includes(extension)) return true;
+  const url = String(item.url || '').toLowerCase().split(/[?#]/)[0];
+  return /\.(mp4|mkv|mov|webm|avi|mpeg|mpg|wmv|m4v)$/.test(url);
+}
+
+function syncMediaStageForItem(item) {
+  const canvas = $('#visualizerCanvas');
+  const video = isVideoItem(item);
+
+  if (canvas) canvas.style.display = video ? 'none' : '';
+  resolveDecks();
+  decks.forEach((deck) => {
+    if (!deck) return;
+    deck.style.zIndex = video ? '2' : '';
+  });
+}
+
 function applyDeckVolume(deck, gain = Number(deck.dataset.gain || 1)) {
   deck.dataset.gain = String(gain);
   const micDuckFactor = state.djMic.duckingActive ? 10 ** (-state.djMic.duckDb / 20) : 1;
@@ -1705,7 +1725,13 @@ async function playAt(index, blend = false) {
     toast('Audio engine could not start. Check the output device and restart Spider.');
     return;
   }
-  try { void audioContext.resume(); } catch {}
+  try {
+    if (audioContext.state === 'suspended') await audioContext.resume();
+  } catch (error) {
+    console.warn('AudioContext resume failed', error);
+  }
+
+  syncMediaStageForItem(item);
   const oldDeck = activeMedia();
   const firstPlay = state.currentIndex < 0 || !oldDeck.src;
   const newDeckIndex = firstPlay ? state.activeDeck : 1 - state.activeDeck;
@@ -1771,7 +1797,17 @@ function togglePlay() {
   }
 
   if (deck.paused) {
-    void deck.play().catch(() => toast('Playback could not resume'));
+    const resume = async () => {
+      try {
+        const context = ensureAudioEngine();
+        if (context?.state === 'suspended') await context.resume();
+        await deck.play();
+      } catch (error) {
+        console.warn('Playback could not resume', error);
+        toast('Playback could not resume');
+      }
+    };
+    void resume();
     return;
   }
 

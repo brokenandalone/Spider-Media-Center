@@ -431,6 +431,52 @@ function createMainWindow() {
   void mainWindow.loadFile(PLAYER_FILE);
 }
 
+function openWebPage(rawUrl) {
+  const target = new URL(String(rawUrl || '').trim());
+  if (!['http:', 'https:'].includes(target.protocol)) {
+    throw new Error('Only HTTP and HTTPS web pages can be opened.');
+  }
+
+  const key = `web:${target.hostname}`;
+  const existing = serviceWindows.get(key);
+  if (existing && !existing.isDestroyed()) {
+    existing.show();
+    existing.focus();
+    void existing.loadURL(target.href);
+    return { ok: true, url: target.href };
+  }
+
+  const serviceWindow = new BrowserWindow({
+    title: `${target.hostname} · Spider Media Center`,
+    width: 1280,
+    height: 840,
+    minWidth: 800,
+    minHeight: 560,
+    backgroundColor: '#08050d',
+    icon: fs.existsSync(ICON_PATH) ? ICON_PATH : undefined,
+    autoHideMenuBar: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      partition: `persist:spider-web-${crypto.createHash('sha1').update(target.hostname).digest('hex').slice(0, 12)}`
+    }
+  });
+
+  serviceWindow.setMenu(null);
+  serviceWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) {
+      void serviceWindow.loadURL(url);
+    }
+    return { action: 'deny' };
+  });
+  serviceWindow.on('closed', () => serviceWindows.delete(key));
+  serviceWindows.set(key, serviceWindow);
+  void serviceWindow.loadURL(target.href);
+  return { ok: true, url: target.href };
+}
+
 function openService(serviceKey, query = '') {
   const service = SERVICES[serviceKey];
   if (!service) throw new Error('Unknown service');
@@ -1146,6 +1192,7 @@ ipcMain.handle('media:from-paths', async (_event, paths) => await safeMediaEntri
 ipcMain.handle('iptv:load', (_event, url) => loadIptvPlaylist(url || IPTV_DEFAULT_PLAYLIST));
 ipcMain.handle('radio:directory-search', (_event, options) => searchRadioStations(options || {}));
 ipcMain.handle('dj:portable-info', () => findPortableDj());
+ipcMain.handle('web:open', (_event, url) => openWebPage(url));
 ipcMain.handle('service:open', (_event, service, query) => {
   openService(service, query);
   return { ok: true };

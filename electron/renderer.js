@@ -1708,9 +1708,21 @@ async function playAt(index, blend = false) {
   applyDeckVolume(newDeck, blend && !firstPlay ? 0 : 1);
 
   try {
-    void newDeck.play();
+    await newDeck.play();
   } catch (error) {
-    toast(`Could not play ${item.title}`);
+    const message = `Could not play ${item.title || 'this source'}`;
+    console.warn(message, error);
+    if (IS_REACT_UI) {
+      window.dispatchEvent(new CustomEvent('spider:playback-error', {
+        detail: {
+          message,
+          source: item.url || '',
+          error: String(error?.message || error || '')
+        }
+      }));
+    } else {
+      toast(message);
+    }
     return;
   }
 

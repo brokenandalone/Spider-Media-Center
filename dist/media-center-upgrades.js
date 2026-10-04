@@ -1,6 +1,20 @@
 (() => {
   const IPTV_DEFAULT = 'https://iptv-org.github.io/iptv/index.m3u';
 
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = async (...args) => {
+    const response = await nativeFetch(...args);
+    try {
+      const target = String(args[0]?.url || args[0] || '');
+      if (/\/dj\/prepare(?:$|\?)/.test(target)) {
+        response.clone().json().then((payload) => {
+          window.__spiderLastDjTalkOver = payload?.talkOver || null;
+        }).catch(() => {});
+      }
+    } catch { }
+    return response;
+  };
+
   const state = {
     iptv: [],
     radio: [],

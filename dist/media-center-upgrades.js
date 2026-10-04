@@ -198,7 +198,8 @@
       actions.insertBefore(button, actions.children[1] || null);
     }
 
-    button.textContent = dj.isRunning() ? 'Stop AutoDJ' : 'Start AutoDJ';
+    const desiredLabel = dj.isRunning() ? 'Stop AutoDJ' : 'Start AutoDJ';
+    if (button.textContent !== desiredLabel) button.textContent = desiredLabel;
   }
 
   function syncConnectionCard() {
@@ -208,7 +209,8 @@
     if (!card) return;
 
     const value = card.querySelector('div');
-    if (value) value.textContent = radio.active ? 'live' : 'offline';
+    const desiredStatus = radio.active ? 'live' : 'offline';
+    if (value && value.textContent !== desiredStatus) value.textContent = desiredStatus;
   }
 
   function wireRadioDiagnostics() {
@@ -431,12 +433,20 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
   else boot();
 
-  const observer = new MutationObserver(() => {
-    buildPanel();
-    replaceBranding(document.getElementById('root'));
-    syncBcnControls();
-  });
+  let syncScheduled = false;
+  const scheduleSync = () => {
+    if (syncScheduled) return;
+    syncScheduled = true;
+    window.requestAnimationFrame(() => {
+      syncScheduled = false;
+      buildPanel();
+      replaceBranding(document.getElementById('root'));
+      syncBcnControls();
+    });
+  };
+
+  const observer = new MutationObserver(scheduleSync);
 
   const root = document.getElementById('root');
-  if (root) observer.observe(root, { subtree: true, childList: true, characterData: true });
+  if (root) observer.observe(root, { subtree: true, childList: true });
 })();

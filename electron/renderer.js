@@ -1440,12 +1440,17 @@ function getRadioStateSnapshot() {
   const item = currentItem();
   const title = item?.title || state.radio.nowPlaying || '';
   const artist = item?.artist || '';
+  const live = Boolean(
+    state.radio.active ||
+    state.radio.publicUrl ||
+    state.radio.qrDataUrl
+  );
 
   return {
-    stationName: state.radio.stationName || 'Spider Radio',
-    currentShow: state.radio.currentShow || 'Spider Live',
+    stationName: state.radio.stationName || 'Broken City Network',
+    currentShow: state.radio.currentShow || 'BCN Live',
     djName: state.radio.djName || '',
-    active: Boolean(state.radio.active),
+    active: live,
     listenerCount: Number(state.radio.listenerCount) || 0,
     peakListeners: Number(state.radio.peakListeners) || 0,
     publicUrl: state.radio.publicUrl || '',
@@ -1456,16 +1461,17 @@ function getRadioStateSnapshot() {
     format: state.radio.format || '',
     startedAt: state.radio.startedAt || null,
     uptime: state.radio.uptime || '',
-    connectionStatus: state.radio.connectionStatus || (state.radio.active ? 'online' : 'offline')
+    connectionStatus: live ? 'live' : 'offline'
   };
 }
 
 function updateNowPlaying() {
   const item = currentItem();
 
-  if (state.radio.active) {
+  if (state.radio.active || state.radio.publicUrl || state.radio.qrDataUrl) {
+    state.radio.active = true;
     state.radio.nowPlaying = item?.title || state.radio.nowPlaying || '';
-    state.radio.connectionStatus = state.radio.connectionStatus || 'online';
+    state.radio.connectionStatus = 'live';
   }
 
   // When the React UI is mounted it owns the player DOM. Avoid mutating

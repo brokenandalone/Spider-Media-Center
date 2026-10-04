@@ -195,12 +195,12 @@ An active feature branch adds the next Media Center layer:
 - Broken City Network (BCN) public-facing station branding
 - international talk/news/speech radio discovery using Radio Browser
 - public IPTV playlist loading, including the iptv-org catalog
-- VLC compatibility/fallback playback for network sources
+- Spider-native network playback architecture using embedded/reused VLC/libVLC technology where license-compatible
 - a BCN media/relay panel layered on top of the compiled 7.5 UI
 - portable USB AI-DJ discovery through a `SPIDER_DJ/spider-dj.json` manifest
 - architecture for a true live-radio AI host with show-clock, back-announces, front-sells, liners, requests and mix timing
 
-The portable AI DJ can ultimately run with a bundled GGUF/llama.cpp stack from the USB drive or use Spider OS's local Ollama runtime.
+The portable AI DJ can ultimately run with a bundled GGUF/llama.cpp stack from the USB drive or use Spider OS's local Ollama runtime. Spider Media Center will not launch VLC as an external fallback player; VideoLAN technology is treated as an upstream source/embedded engine option inside Spider's own playback stack.
 
 External radio retransmission should only be enabled when the operator has permission to rebroadcast the selected source. Generic web services can be opened normally, but Spider does not include protected-stream extraction or DRM/paywall/ad-circumvention code.
 

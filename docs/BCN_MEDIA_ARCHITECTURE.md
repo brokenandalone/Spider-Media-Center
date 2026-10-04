@@ -12,29 +12,32 @@ Spider Media Center is evolving from a desktop player into the playback and broa
 6. Make the AI DJ portable so its runtime, prompts, voice assets and optional model can live on a USB drive.
 7. Make the AI DJ behave like a radio host, not a text-to-speech announcement button.
 
-## Playback layers
+## Playback architecture
 
-### Layer 1: native Spider player
+Spider Media Center will **not** launch VLC as a fallback player.
 
-Use the existing HTML media decks first for sources Chromium handles well.
+The long-term design is one Spider-native media engine with the Spider interface, Spider state model, Spider broadcast mixer and BCN workflow. Where practical, that engine can reuse or embed appropriate open-source VLC/libVLC playback technology and modules instead of reinventing protocol, demuxing and codec support.
 
-### Layer 2: VLC compatibility
+### Spider native playback core
 
-When native playback cannot handle a URL or format, Spider can hand the source to VLC/libVLC.
+The engine should own:
 
-The VLC layer is for:
-
+- local playback
 - HLS and M3U8
 - RTSP
 - transport streams
 - unusual codecs and containers
-- network radio streams
+- international radio streams
 - IPTV
+- network filesystems and DLNA/UPnP later
 - removable media and discs later
+- audio/video output routing into Spider's mixer and broadcast graph
 
-Do not copy the VLC desktop UI or branding. Spider keeps its own interface and uses the VLC engine as an optional backend.
+The important rule is that VLC is **source technology**, not a separate player launched beside Spider.
 
-### Layer 3: browser/service handoff
+VideoLAN documents libVLC as an embeddable C library under LGPL 2.1, and many playback modules were relicensed to LGPL. VLC's desktop interface remains GPL, so Spider should reuse only code/modules whose licenses are compatible with the project and preserve required notices and source obligations.
+
+### Browser/service handoff
 
 Web services that require their own web application or protected playback stay in a sandboxed service window.
 
@@ -150,3 +153,17 @@ Spider Media Center owns timing and audio mixing. The AI proposes the break; the
 ## Source policy
 
 Spider can provide generic web-service launchers and normal URL playback. It should not scrape protected movie sites or extract protected streams. Services such as LookMovie should remain external browser destinations rather than becoming built-in stream extractors.
+
+## VLC upstream usage policy
+
+Use VideoLAN as an upstream engineering source, not as an external fallback application.
+
+Preferred order:
+
+1. Embed libVLC or compatible LGPL playback modules when that gives Spider a mature implementation quickly.
+2. Port narrowly scoped LGPL modules or ideas where embedding the whole engine is unnecessary.
+3. Keep Spider's own UI, state model, queue, visualizer, DJ, broadcast mixer and BCN logic.
+4. Track upstream license headers and notices for every reused file or module.
+5. Do not copy VLC interface modules or GPL-only code into Spider unless the project intentionally adopts the corresponding GPL obligations.
+
+This lets Spider inherit mature protocol/demux/codec work without turning the product into a reskinned VLC launcher.

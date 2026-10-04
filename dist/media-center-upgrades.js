@@ -53,9 +53,8 @@
     }, true);
   }
 
-  async function playVlc(item) {
-    if (!window.spider?.playWithVlc) throw new Error('VLC integration is not available.');
-    return await window.spider.playWithVlc(item.url || item, {});
+  function nativeEngineNotice() {
+    alert('This source will use Spider Media Center\'s embedded native engine when the libVLC-derived core is wired in. External VLC launching has been removed.');
   }
 
   function replaceBranding(root = document.body) {
@@ -96,20 +95,7 @@
       }
     });
 
-    const vlc = el('button', {
-      type: 'button',
-      className: 'bcn-small-button',
-      text: 'VLC',
-      onclick: async () => {
-        try {
-          await playVlc(item);
-        } catch (error) {
-          alert(error.message);
-        }
-      }
-    });
-
-    const bcn = el('button', {
+        const bcn = el('button', {
       type: 'button',
       className: 'bcn-small-button bcn-accent',
       text: 'Cue to BCN',
@@ -129,7 +115,7 @@
 
     return el('div', { className: 'bcn-result-card' },
       el('div', { className: 'bcn-result-copy' }, title, meta),
-      el('div', { className: 'bcn-result-actions' }, play, vlc, bcn)
+      el('div', { className: 'bcn-result-actions' }, play, bcn)
     );
   }
 
@@ -165,7 +151,7 @@
       onclick: () => panel.classList.add('bcn-hidden')
     });
 
-    const vlcStatus = el('span', { className: 'bcn-status', text: 'Checking VLC…' });
+    const engineStatus = el('span', { className: 'bcn-status', text: 'Spider native engine · integration branch' });
 
     const iptvUrl = el('input', { type: 'url', value: IPTV_DEFAULT });
     const iptvSearch = el('input', { type: 'search', placeholder: 'Filter channels…' });
@@ -239,13 +225,21 @@
       type: 'url',
       placeholder: 'https://www.youtube.com/watch?v=…'
     });
-    const youtubeVlc = el('button', {
+    const youtubeNative = el('button', {
       type: 'button',
       className: 'bcn-primary',
-      text: 'Open YouTube URL in VLC',
-      onclick: async () => {
+      text: 'Queue YouTube URL',
+      onclick: () => {
+        const url = String(youtubeUrl.value || '').trim();
+        if (!url) return;
         try {
-          await playVlc(youtubeUrl.value);
+          enqueueNetwork({
+            id: `youtube-${Date.now()}`,
+            title: 'YouTube stream',
+            url,
+            source: 'network',
+            extension: 'YOUTUBE'
+          });
         } catch (error) {
           alert(error.message);
         }
@@ -276,7 +270,7 @@
           el('span', { className: 'bcn-eyebrow', text: 'BROKEN CITY NETWORK' }),
           el('h2', { text: 'BCN Media & Relay' })
         ),
-        vlcStatus
+        engineStatus
       ),
       el('p', { className: 'bcn-muted', text: 'Search world radio, load IPTV, use VLC compatibility, and cue permitted sources into the BCN broadcast mix.' }),
       el('div', { className: 'bcn-rights' },
@@ -296,9 +290,9 @@
         iptvResults
       ),
       el('div', { className: 'bcn-section' },
-        el('h3', { text: 'YouTube via VLC' }),
-        el('p', { className: 'bcn-muted', text: 'Pass a normal YouTube URL to VLC when VLC can resolve it. Spider does not implement DRM, paywall or ad-circumvention code.' }),
-        el('div', { className: 'bcn-row' }, youtubeUrl, youtubeVlc)
+        el('h3', { text: 'YouTube / web media' }),
+        el('p', { className: 'bcn-muted', text: 'Queue a normal YouTube URL for the Spider native engine. This branch does not add DRM, paywall or ad-circumvention code.' }),
+        el('div', { className: 'bcn-row' }, youtubeUrl, youtubeNative)
       ),
       el('div', { className: 'bcn-section' },
         el('h3', { text: 'Portable AI DJ' }),
@@ -311,11 +305,6 @@
     launcher.addEventListener('click', () => panel.classList.toggle('bcn-hidden'));
     document.body.append(launcher, panel);
 
-    window.spider?.vlcInfo?.().then((info) => {
-      vlcStatus.textContent = info?.available
-        ? `VLC ready · ${info.version || info.path}`
-        : 'VLC not found';
-    }).catch(() => { vlcStatus.textContent = 'VLC not found'; });
   }
 
   const boot = () => {

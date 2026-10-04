@@ -1,0 +1,28 @@
+name: Validate Media Center
+
+on:
+  push:
+    branches:
+      - main
+      - feature/bcn-network-ai-dj
+  pull_request:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check JavaScript
+        run: |
+          node --check electron/main.cjs
+          node --check electron/preload.cjs
+          node --check electron/renderer.js
+          node --check electron/vlc-engine.cjs
+          node --check electron/network-directory.cjs
+          node --check electron/usb-dj.cjs
+          node --check dist/media-center-upgrades.js
+      - name: Check portable DJ Python
+        run: python3 -m py_compile dj-usb/service/service.py

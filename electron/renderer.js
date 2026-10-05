@@ -1466,6 +1466,29 @@ function getRadioStateSnapshot() {
     state.radio.qrDataUrl
   );
 
+  const startedAt = state.radio.startedAt || null;
+  const startedMs = typeof startedAt === 'number'
+    ? startedAt
+    : Date.parse(String(startedAt || ''));
+
+  let uptime = '';
+  if (live && Number.isFinite(startedMs)) {
+    const total = Math.max(0, Math.floor((Date.now() - startedMs) / 1000));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const seconds = total % 60;
+    uptime = `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+
+  const mimeType = String(state.radio.mimeType || '');
+  const format = state.radio.format || (
+    /mp4a|audio\/mp4/i.test(mimeType)
+      ? 'AAC / MP4'
+      : /opus|webm/i.test(mimeType)
+        ? 'Opus / WebM'
+        : mimeType
+  );
+
   return {
     stationName: state.radio.stationName || 'Broken City Network',
     currentShow: state.radio.currentShow || 'BCN Live',
@@ -1477,10 +1500,11 @@ function getRadioStateSnapshot() {
     qrDataUrl: state.radio.qrDataUrl || '',
     nowPlaying: title,
     nowPlayingMeta: title ? { title, artist } : null,
-    bitrate: state.radio.bitrate || '',
-    format: state.radio.format || '',
-    startedAt: state.radio.startedAt || null,
-    uptime: state.radio.uptime || '',
+    bitrate: state.radio.bitrate || (live ? '128 kbps' : ''),
+    format,
+    mimeType,
+    startedAt,
+    uptime,
     connectionStatus: live ? 'live' : 'offline'
   };
 }

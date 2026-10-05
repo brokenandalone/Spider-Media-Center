@@ -16,6 +16,12 @@ const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const QRCode = require('qrcode');
+const {
+  IPTV_DEFAULT_PLAYLIST,
+  loadIptvPlaylist,
+  searchRadioStations
+} = require('./network-directory.cjs');
+const { findPortableDj } = require('./usb-dj.cjs');
 
 const ROOT = path.join(__dirname, '..');
 const USE_REACT_UI = process.env.SPIDER_LEGACY_UI !== '1' && process.env.SPIDER_SMOKE_TEST !== '1';
@@ -423,6 +429,52 @@ function createMainWindow() {
     void safeMediaEntries(paths).then((entries) => mainWindow.webContents.send('media:open', entries));
   });
   void mainWindow.loadFile(PLAYER_FILE);
+}
+
+function openWebPage(rawUrl) {
+  const target = new URL(String(rawUrl || '').trim());
+  if (!['http:', 'https:'].includes(target.protocol)) {
+    throw new Error('Only HTTP and HTTPS web pages can be opened.');
+  }
+
+  const key = `web:${target.hostname}`;
+  const existing = serviceWindows.get(key);
+  if (existing && !existing.isDestroyed()) {
+    existing.show();
+    existing.focus();
+    void existing.loadURL(target.href);
+    return { ok: true, url: target.href };
+  }
+
+  const serviceWindow = new BrowserWindow({
+    title: `${target.hostname} · Spider Media Center`,
+    width: 1280,
+    height: 840,
+    minWidth: 800,
+    minHeight: 560,
+    backgroundColor: '#08050d',
+    icon: fs.existsSync(ICON_PATH) ? ICON_PATH : undefined,
+    autoHideMenuBar: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      partition: `persist:spider-web-${crypto.createHash('sha1').update(target.hostname).digest('hex').slice(0, 12)}`
+    }
+  });
+
+  serviceWindow.setMenu(null);
+  serviceWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) {
+      void serviceWindow.loadURL(url);
+    }
+    return { action: 'deny' };
+  });
+  serviceWindow.on('closed', () => serviceWindows.delete(key));
+  serviceWindows.set(key, serviceWindow);
+  void serviceWindow.loadURL(target.href);
+  return { ok: true, url: target.href };
 }
 
 function openService(serviceKey, query = '') {
@@ -1137,6 +1189,10 @@ ipcMain.handle('media:choose-folder', async () => {
   return await safeMediaEntries(mediaFilesInFolder(result.filePaths[0]));
 });
 ipcMain.handle('media:from-paths', async (_event, paths) => await safeMediaEntries(Array.isArray(paths) ? paths : []));
+ipcMain.handle('iptv:load', (_event, url) => loadIptvPlaylist(url || IPTV_DEFAULT_PLAYLIST));
+ipcMain.handle('radio:directory-search', (_event, options) => searchRadioStations(options || {}));
+ipcMain.handle('dj:portable-info', () => findPortableDj());
+ipcMain.handle('web:open', (_event, url) => openWebPage(url));
 ipcMain.handle('service:open', (_event, service, query) => {
   openService(service, query);
   return { ok: true };

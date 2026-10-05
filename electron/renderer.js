@@ -158,7 +158,10 @@ const state = {
     musicDuckLevel: 0.3,
     crossfadeDuration: 4,
     pendingBreak: null,
-    endingNotifiedFor: ''
+    endingNotifiedFor: '',
+    duckingActive: false,
+    activeDuckLevel: 0.3,
+    liveBreakActive: false
   },
   radio: {
     active: false,
@@ -422,10 +425,33 @@ function playable(item) {
   return Boolean(item && item.url);
 }
 
+function isVideoItem(item) {
+  if (!item) return false;
+  const extension = String(item.extension || '').toLowerCase();
+  if (['mp4', 'mkv', 'mov', 'webm', 'avi', 'mpeg', 'mpg', 'wmv', 'm4v'].includes(extension)) return true;
+  const url = String(item.url || '').toLowerCase().split(/[?#]/)[0];
+  return /\.(mp4|mkv|mov|webm|avi|mpeg|mpg|wmv|m4v)$/.test(url);
+}
+
+function syncMediaStageForItem(item) {
+  const canvas = $('#visualizerCanvas');
+  const video = isVideoItem(item);
+
+  if (canvas) canvas.style.display = video ? 'none' : '';
+  resolveDecks();
+  decks.forEach((deck) => {
+    if (!deck) return;
+    deck.style.zIndex = video ? '2' : '';
+  });
+}
+
 function applyDeckVolume(deck, gain = Number(deck.dataset.gain || 1)) {
   deck.dataset.gain = String(gain);
-  const duckFactor = state.djMic.duckingActive ? 10 ** (-state.djMic.duckDb / 20) : 1;
-  deck.volume = Math.max(0, Math.min(1, state.masterVolume * gain * duckFactor));
+  const micDuckFactor = state.djMic.duckingActive ? 10 ** (-state.djMic.duckDb / 20) : 1;
+  const aiDjDuckFactor = state.aiDj.duckingActive
+    ? Math.max(0.05, Math.min(1, Number(state.aiDj.activeDuckLevel) || state.aiDj.musicDuckLevel || 0.3))
+    : 1;
+  deck.volume = Math.max(0, Math.min(1, state.masterVolume * gain * micDuckFactor * aiDjDuckFactor));
   deck.muted = state.muted || state.panicMuted;
 }
 
@@ -1434,32 +1460,62 @@ function getRadioStateSnapshot() {
   const item = currentItem();
   const title = item?.title || state.radio.nowPlaying || '';
   const artist = item?.artist || '';
+  const live = Boolean(
+    state.radio.active ||
+    state.radio.publicUrl ||
+    state.radio.qrDataUrl
+  );
+
+  const startedAt = state.radio.startedAt || null;
+  const startedMs = typeof startedAt === 'number'
+    ? startedAt
+    : Date.parse(String(startedAt || ''));
+
+  let uptime = '';
+  if (live && Number.isFinite(startedMs)) {
+    const total = Math.max(0, Math.floor((Date.now() - startedMs) / 1000));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const seconds = total % 60;
+    uptime = `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+
+  const mimeType = String(state.radio.mimeType || '');
+  const format = state.radio.format || (
+    /mp4a|audio\/mp4/i.test(mimeType)
+      ? 'AAC / MP4'
+      : /opus|webm/i.test(mimeType)
+        ? 'Opus / WebM'
+        : mimeType
+  );
 
   return {
-    stationName: state.radio.stationName || 'Spider Radio',
-    currentShow: state.radio.currentShow || 'Spider Live',
+    stationName: state.radio.stationName || 'Broken City Network',
+    currentShow: state.radio.currentShow || 'BCN Live',
     djName: state.radio.djName || '',
-    active: Boolean(state.radio.active),
+    active: live,
     listenerCount: Number(state.radio.listenerCount) || 0,
     peakListeners: Number(state.radio.peakListeners) || 0,
     publicUrl: state.radio.publicUrl || '',
     qrDataUrl: state.radio.qrDataUrl || '',
     nowPlaying: title,
     nowPlayingMeta: title ? { title, artist } : null,
-    bitrate: state.radio.bitrate || '',
-    format: state.radio.format || '',
-    startedAt: state.radio.startedAt || null,
-    uptime: state.radio.uptime || '',
-    connectionStatus: state.radio.connectionStatus || (state.radio.active ? 'online' : 'offline')
+    bitrate: state.radio.bitrate || (live ? '128 kbps' : ''),
+    format,
+    mimeType,
+    startedAt,
+    uptime,
+    connectionStatus: live ? 'live' : 'offline'
   };
 }
 
 function updateNowPlaying() {
   const item = currentItem();
 
-  if (state.radio.active) {
+  if (state.radio.active || state.radio.publicUrl || state.radio.qrDataUrl) {
+    state.radio.active = true;
     state.radio.nowPlaying = item?.title || state.radio.nowPlaying || '';
-    state.radio.connectionStatus = state.radio.connectionStatus || 'online';
+    state.radio.connectionStatus = 'live';
   }
 
   // When the React UI is mounted it owns the player DOM. Avoid mutating
@@ -1575,6 +1631,26 @@ function prepareDeck(deck, item) {
         state.aiDj.endingNotifiedFor = item.id;
         emitPlayerEvent('trackEnding', { currentTrack: toAIDJTrack(item, deck), nextTrack: nextAIDJTrack(), secondsRemaining: remaining });
       }
+
+      const pending = state.aiDj.pendingBreak;
+      const talkOverAt = Math.max(
+        2,
+        Number(pending?.talkOver?.startSecondsBeforeEnd) || Math.min(8, Math.max(3, state.aiDj.crossfadeDuration + 2))
+      );
+
+      if (
+        pending &&
+        state.repeat !== 'one' &&
+        !state.aiDj.liveBreakActive &&
+        Number.isFinite(remaining) &&
+        remaining <= talkOverAt
+      ) {
+        state.aiDj.pendingBreak = null;
+        state.aiDj.liveBreakActive = true;
+        void playDJBreak(pending).finally(() => {
+          state.aiDj.liveBreakActive = false;
+        });
+      }
     });
     deck.addEventListener('pause', () => emitPlayerEvent('playbackPaused', { currentTrack: toAIDJTrack(currentItem(), deck) }));
     deck.addEventListener('play', () => emitPlayerEvent('playbackResumed', { currentTrack: toAIDJTrack(currentItem(), deck) }));
@@ -1603,6 +1679,16 @@ async function playDJBreak(breakItem) {
   if (typeof source !== 'function') return;
   const url = normalizeDJAudioUrl(breakItem.audioFile);
   if (!url) return;
+
+  const duckLevel = Math.max(
+    0.05,
+    Math.min(1, Number(breakItem?.talkOver?.duckLevel) || state.aiDj.musicDuckLevel || 0.3)
+  );
+
+  state.aiDj.duckingActive = true;
+  state.aiDj.activeDuckLevel = duckLevel;
+  decks.forEach((deck) => applyDeckVolume(deck));
+
   try {
     const audioSource = await source.call(window.__spiderAudioEngine, url, 0, { volume: state.aiDj.voiceVolume });
     const duration = Number(audioSource?.buffer?.duration) || 12;
@@ -1614,6 +1700,9 @@ async function playDJBreak(breakItem) {
     });
   } catch (error) {
     console.warn('AI DJ break failed; continuing music', error);
+  } finally {
+    state.aiDj.duckingActive = false;
+    decks.forEach((deck) => applyDeckVolume(deck));
   }
 }
 
@@ -1660,7 +1749,13 @@ async function playAt(index, blend = false) {
     toast('Audio engine could not start. Check the output device and restart Spider.');
     return;
   }
-  try { void audioContext.resume(); } catch {}
+  try {
+    if (audioContext.state === 'suspended') await audioContext.resume();
+  } catch (error) {
+    console.warn('AudioContext resume failed', error);
+  }
+
+  syncMediaStageForItem(item);
   const oldDeck = activeMedia();
   const firstPlay = state.currentIndex < 0 || !oldDeck.src;
   const newDeckIndex = firstPlay ? state.activeDeck : 1 - state.activeDeck;
@@ -1669,9 +1764,21 @@ async function playAt(index, blend = false) {
   applyDeckVolume(newDeck, blend && !firstPlay ? 0 : 1);
 
   try {
-    void newDeck.play();
+    await newDeck.play();
   } catch (error) {
-    toast(`Could not play ${item.title}`);
+    const message = `Could not play ${item.title || 'this source'}`;
+    console.warn(message, error);
+    if (IS_REACT_UI) {
+      window.dispatchEvent(new CustomEvent('spider:playback-error', {
+        detail: {
+          message,
+          source: item.url || '',
+          error: String(error?.message || error || '')
+        }
+      }));
+    } else {
+      toast(message);
+    }
     return;
   }
 
@@ -1714,7 +1821,17 @@ function togglePlay() {
   }
 
   if (deck.paused) {
-    void deck.play().catch(() => toast('Playback could not resume'));
+    const resume = async () => {
+      try {
+        const context = ensureAudioEngine();
+        if (context?.state === 'suspended') await context.resume();
+        await deck.play();
+      } catch (error) {
+        console.warn('Playback could not resume', error);
+        toast('Playback could not resume');
+      }
+    };
+    void resume();
     return;
   }
 
@@ -1900,7 +2017,8 @@ window.__spiderPlayerEngine = {
       id: payload.id || `dj-break-${Date.now()}`,
       audioFile,
       script: String(payload.script || ''),
-      type: payload.type || 'transition'
+      type: payload.type || 'transition',
+      talkOver: payload.talkOver || window.__spiderLastDjTalkOver || null
     };
     return { ok: true, id: state.aiDj.pendingBreak.id };
   },
@@ -2486,7 +2604,7 @@ window.__spiderPlayerEngine = {
   });
     return { publicUrl: '', listenerCount: 0, active: false };
   },
-  getRadioState: () => ({ active: state.radio.active, publicUrl: state.radio.publicUrl, listenerCount: state.radio.listenerCount })
+  getRadioState: getRadioStateSnapshot
 };
 
 // Dynamically load the small external bridge which exposes the stable

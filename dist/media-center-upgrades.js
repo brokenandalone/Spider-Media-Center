@@ -452,7 +452,18 @@
   }
 
   function ensureFloatingAutoDjControl() {
+    const internalAutoDj = [...document.querySelectorAll('.dj-center-actions button')]
+      .find((node) => /auto\s*dj/i.test(node.textContent || ''));
+
     let button = document.getElementById('floatingAutoDjButton');
+
+    // The control-center button is the permanent control. Keep the floating
+    // button only as a fallback for layouts where that control is unavailable.
+    if (internalAutoDj) {
+      button?.remove();
+      return;
+    }
+
     if (!button) {
       button = el('button', {
         id: 'floatingAutoDjButton',
@@ -509,11 +520,27 @@
     if (button.textContent !== label) button.textContent = label;
   }
 
+  function syncUiPolish() {
+    const brand = document.querySelector('.brand h1 span');
+    if (brand && brand.textContent !== 'MEDIA CENTER') brand.textContent = 'MEDIA CENTER';
+
+    const version = document.getElementById('versionLabel');
+    if (version && version.textContent !== 'v1.0.0') version.textContent = 'v1.0.0';
+
+    try {
+      const queue = window.__spiderPlayerBridge?.getQueueSnapshot?.()?.queue || [];
+      const count = document.getElementById('libraryCount');
+      const label = `${queue.length} track${queue.length === 1 ? '' : 's'}`;
+      if (count && count.textContent !== label) count.textContent = label;
+    } catch { }
+  }
+
   function lightSync() {
     buildPanel();
     ensureTalkToSpiderControl();
     ensureFloatingAutoDjControl();
     syncConnectionCard();
+    syncUiPolish();
   }
 
   const boot = () => {

@@ -22,6 +22,16 @@ const {
   searchRadioStations
 } = require('./network-directory.cjs');
 const { findPortableDj } = require('./usb-dj.cjs');
+const { MediaCompatibility } = require('./media-compatibility.cjs');
+let mediaCompatibility;
+function compatibility() {
+  const configured = process.env.XDG_CACHE_HOME;
+  const root = process.platform === 'linux'
+    ? (configured && path.isAbsolute(configured) ? configured : path.join(app.getPath('home'), '.cache'))
+    : app.getPath('temp');
+  return mediaCompatibility ||= new MediaCompatibility(path.join(root, 'Spider Media Center', 'movie-compatibility'));
+}
+app.on('before-quit', () => mediaCompatibility?.cancel());
 
 const ROOT = path.join(__dirname, '..');
 const USE_REACT_UI = process.env.SPIDER_LEGACY_UI !== '1' && process.env.SPIDER_SMOKE_TEST !== '1';
@@ -76,7 +86,7 @@ const SERVICES = Object.freeze({
 
 const MEDIA_EXTENSIONS = new Set([
   '.aac', '.aiff', '.avi', '.flac', '.m4a', '.mkv', '.mov', '.mp3',
-  '.mp4', '.mpeg', '.mpg', '.ogg', '.opus', '.wav', '.webm', '.wmv'
+  '.mp4', '.m4v', '.mpeg', '.mpg', '.ogg', '.opus', '.wav', '.webm', '.wmv'
 ]);
 
 let mainWindow;
@@ -1040,7 +1050,7 @@ async function stopRadioServer() {
 
 async function startRadioServer(profile) {
   await stopRadioServer();
-  if (!fs.existsSync(CLOUDFLARED_PATH)) throw new Error('The Spider public relay is not installed.');
+  if (process.env.SPIDER_RADIO_TEST_LOCAL !== '1' && !fs.existsSync(CLOUDFLARED_PATH)) throw new Error('The Spider public relay is not installed.');
   const token = crypto.randomBytes(20).toString('hex');
   radioState = {
     active: true,
@@ -1162,6 +1172,13 @@ async function startRadioServer(profile) {
     throw error;
   });
 
+  // The renderer must go off air if an established relay later exits.
+  const establishedTunnel = radioTunnel;
+  establishedTunnel.once('exit', () => {
+    if (radioTunnel === establishedTunnel) {
+      void stopRadioServer().catch((error) => writeDiagnostic('radio-stop', error));
+    }
+  });
   radioState.publicUrl = `${publicBase}/${token}`;
   radioState.qrDataUrl = await QRCode.toDataURL(radioState.publicUrl, { width: 360, margin: 1, color: { dark: '#261033', light: '#f2e5ff' } });
   sendRadioEvent({ type: 'live', state: { ...radioState, token: undefined } });
@@ -1169,6 +1186,16 @@ async function startRadioServer(profile) {
 }
 
 ipcMain.handle('app:info', () => ({ version: app.getVersion(), packaged: app.isPackaged }));
+ipcMain.handle('media:prepare-compatibility', async (event, url) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error('Untrusted playback request.');
+  return compatibility().prepare(url, progress => {
+    if (!event.sender.isDestroyed()) event.sender.send('media:compatibility-progress', progress);
+  });
+});
+ipcMain.handle('media:cancel-compatibility', (event) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) return false;
+  return mediaCompatibility?.cancel() || false;
+});
 ipcMain.handle('media:choose', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Add media to Spider',

@@ -33,6 +33,41 @@
     return node;
   };
 
+  let noticeTimer;
+  window.addEventListener('spider:notice', event => {
+    let box = document.getElementById('spider-playback-notice');
+    if (!box) { box = el('div', {id: 'spider-playback-notice', role: 'status'}); document.body.append(box); }
+    box.textContent = event.detail?.message || '';
+    box.hidden = false;
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => { box.hidden = true; }, 4500);
+  });
+  window.addEventListener('spider:playback-error', event => {
+    const detail = event.detail || {};
+    document.getElementById('spider-playback-error')?.remove();
+    const status = el('p', {text: detail.error || 'This source could not be decoded.'});
+    const box = el('section', {id: 'spider-playback-error', role: 'alert'},
+      el('strong', {text: detail.message || 'Playback failed'}), status);
+    let unsubscribe;
+    const dismiss = el('button', {text: 'Dismiss', onClick: () => { unsubscribe?.(); box.remove(); }});
+    if (detail.canPrepare && window.spider?.prepareMovie) {
+      box.append(el('p', {text: 'Prepare a separate compatible copy using Ubuntu Studio’s FFmpeg, then play it here. The original is kept. Large movies can take several minutes.'}));
+      const cancel = el('button', {text: 'Cancel preparation', onClick: () => window.spider.cancelMoviePreparation()});
+      cancel.hidden = true;
+      const prepare = el('button', {text: 'Prepare and play here', onClick: async () => {
+        prepare.disabled = true; cancel.hidden = false; dismiss.hidden = true;
+        status.textContent = 'Preparing movie for embedded playback…';
+        unsubscribe = window.spider.onMoviePreparation?.(progress => { status.textContent = `Prepared ${Math.floor(progress.seconds || 0)} seconds of video…`; });
+        try {
+          if (await playerBridge().prepareMovie(detail.source)) box.remove();
+        } catch (error) { status.textContent = error?.message || String(error); }
+        finally { unsubscribe?.(); prepare.disabled = false; cancel.hidden = true; dismiss.hidden = false; }
+      }});
+      box.append(prepare, cancel);
+    }
+    box.append(dismiss); document.body.append(box);
+  });
+
   function playerBridge() {
     return window.__spiderPlayerBridge || window.__spiderPlayerEngine || null;
   }
@@ -140,7 +175,7 @@
       const radio = window.__spiderPlayerBridge?.getRadioState?.() || {};
       return {
         ...radio,
-        active: Boolean(radio.active || radio.publicUrl || radio.qrDataUrl)
+        active: radio.active === true
       };
     } catch {
       return { active: false };

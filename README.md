@@ -240,3 +240,38 @@ Keeping them separate allows Media Center to be developed, tested, packaged, and
 ## License
 
 No license has been selected yet. Until a license is added, normal copyright restrictions apply.
+
+
+## Playback reliability and local movie compatibility
+
+The Play and queue-play bridge methods now wait for playback before returning a
+snapshot. Failed decoding appears in the Media Center screen. Media Session Play
+and Pause are idempotent; optional mixer failures no longer block the video deck.
+The embedded visualizer keeps running through unavailable canvas mounts, and stale
+broadcast links no longer make a stopped station appear live.
+
+For a local movie that Chromium cannot decode, choose **Prepare and play here**
+in the playback error card. The installed `ffmpeg` decoder prepares a separate
+VP8/Opus WebM copy, then plays it in the existing embedded deck. This is a
+compatibility conversion, not the planned full libVLC engine. It opens no external
+player and does not modify the source. Preparation has elapsed-video progress,
+cancellation, a two-hour time limit, a 4 GiB cache limit, and low-disk checks.
+Cached copies are reused when the source size and modification time match.
+On Linux they live under `$XDG_CACHE_HOME/Spider Media Center/movie-compatibility`
+(or `~/.cache` when unset); stop playback before manually removing cached copies.
+Other platforms use Electron's temporary directory.
+
+Preparation can take several minutes, limits video width to 1920 pixels, uses the
+first video and audio streams, and does not preserve subtitle tracks. It covers
+local movie files; it does not decode streaming-service pages or add HLS support.
+Full direct libVLC decoding, subtitle controls, and native stream support remain
+future work. The existing browser playback path is retained. Direct playback during a mixer
+failure bypasses EQ and broadcast processing until the mixer recovers.
+
+Run `npm run check` and `npm test`. The decoder integration test generates a small
+MPEG-4/PCM Matroska movie, verifies the resulting VP8/Opus streams with ffprobe,
+checks that the original is unchanged, and checks cache reuse. CI installs FFmpeg
+to run this fixture. Tests also cover cancelled preparation, invalid inputs,
+async Play, optional mixer recovery, detached decks, radio state, and canvas
+rescheduling. A packaged Electron GUI and owner-PC playback check are still
+required; source tests are not evidence that the installed binary was updated.

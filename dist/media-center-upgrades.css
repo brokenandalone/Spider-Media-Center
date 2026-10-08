@@ -135,3 +135,9 @@
     flex-wrap: wrap;
   }
 }
+
+#spider-playback-error, #spider-playback-notice { position: fixed; z-index: 10000; bottom: 22px; right: 22px; max-width: min(480px, 90vw); padding: 18px; color: #e8eeee; background: #151a1d; border: 1px solid #e39a58; border-radius: 10px; box-shadow: 0 8px 30px #0009; overflow-wrap: anywhere; }
+#spider-playback-error p { line-height: 1.5; }
+#spider-playback-error button { padding: 8px 12px; margin: 4px; border-radius: 6px; cursor: pointer; }
+#spider-playback-error button:disabled { opacity: .6; cursor: wait; }
+#spider-playback-error [hidden], #spider-playback-notice[hidden] { display: none; }

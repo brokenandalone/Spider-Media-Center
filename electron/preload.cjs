@@ -5,6 +5,13 @@ const invoke = (channel, ...args) => ipcRenderer.invoke(channel, ...args);
 contextBridge.exposeInMainWorld('spider', {
   appInfo: () => invoke('app:info'),
   chooseMedia: () => invoke('media:choose'),
+  prepareMovie: (url) => invoke('media:prepare-compatibility', url),
+  cancelMoviePreparation: () => invoke('media:cancel-compatibility'),
+  onMoviePreparation: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('media:compatibility-progress', listener);
+    return () => ipcRenderer.removeListener('media:compatibility-progress', listener);
+  },
   chooseFolder: () => invoke('media:choose-folder'),
   droppedMedia: (files) => invoke(
     'media:from-paths',

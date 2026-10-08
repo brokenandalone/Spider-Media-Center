@@ -179,6 +179,13 @@ npx --yes asar@3.2.0 pack \
 
 Then install the tested build into the separate Media Center installation. Back up the current ASAR before replacing it.
 
+For the repeatable playback upgrade, use `npm ci`, `npm run check`, `npm test`,
+then `npm run package:linux`. The verified archive, checksum manifest and selective
+installer appear in `release/`; see [build installation](docs/INSTALL-BUILD.md).
+CI also publishes this folder as a workflow artifact. The package retains the
+compiled interface and includes production dependencies, excluding recovered
+backup scripts, the Windows relay binary and build tools.
+
 ## Preservation rules
 
 - Do not modify the known-good Spider Media Player installation.

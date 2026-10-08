@@ -31,3 +31,14 @@ jobs:
         run: node --check electron/media-compatibility.cjs
       - name: Check portable DJ Python
         run: python3 -m py_compile dj-usb/service/service.py
+      - name: Install locked build dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Package verified Linux application upgrade
+        run: |
+          npm run package:linux
+          bash release/install-media-center.sh --check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Spider-Media-Center-Playback-Build
+          path: release/
+          if-no-files-found: error

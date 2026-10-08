@@ -20,6 +20,10 @@
   },
   "scripts": {
     "test": "node --test tests/*.test.cjs",
-    "check": "node --check electron/main.cjs && node --check electron/preload.cjs && node --check electron/renderer.js && node --check electron/renderer.bridge.js && node --check electron/media-compatibility.cjs && node --check dist/media-center-upgrades.js"
+    "check": "node --check electron/main.cjs && node --check electron/preload.cjs && node --check electron/renderer.js && node --check electron/renderer.bridge.js && node --check electron/media-compatibility.cjs && node --check dist/media-center-upgrades.js",
+    "package:linux": "node scripts/package-media-center.mjs"
+  },
+  "devDependencies": {
+    "@electron/asar": "4.2.0"
   }
 }

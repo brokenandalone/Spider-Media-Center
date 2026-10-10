@@ -195,6 +195,21 @@ backup scripts, the Windows relay binary and build tools.
 - Keep a rollback copy before installing a new ASAR.
 - Preserve playback, DJ, radio, visualizers, sharing, and queue behavior while adding new Media Center features.
 
+## BCN signal monitoring
+
+The BCN Media panel now includes an operator-only **BCN Signal Monitor**. It
+distinguishes the public relay being ready, zero connected listeners, waiting
+for the first audio chunk, active socket writes and stale listener streams.
+Metrics are derived from actual audio data writes, rather than a generic ON
+AIR flag. The main process counts delivered chunks, limits slow listener
+backpressure, and restricts broadcast IPC calls to the trusted app window.
+
+When a listener stream stalls, the optional session-only continuity guard
+disarms rather than claiming that changing songs would repair an encoder or
+internet relay problem. A connected stream and successful server writes
+**do not prove the remote listener can hear audio**. Real phone/headphone
+tests are still required before unattended broadcasting is supported.
+
 ## BCN network and native Nova DJ
 
 BCN broadcasting and international media discovery are part of Spider Media Center:

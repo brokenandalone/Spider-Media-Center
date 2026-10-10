@@ -19,6 +19,7 @@ class BcnListenerIntake {
   constructor(options) {
     this.desk = options.desk;
     this.clock = options.clock || (() => Date.now());
+    this.onAccepted = options.onAccepted || (() => {});
     this.salt = crypto.randomBytes(32);
     this.attempts = new Map();
     this.globalAttempts = [];
@@ -90,6 +91,7 @@ class BcnListenerIntake {
         return send(res, 400, { ok: false, message: 'Request must be between 3 and 180 characters.' });
       }
       this.desk.addListenerRequest(body.text);
+      try { this.onAccepted(); } catch {}
       return send(res, 202, { ok: true, message: 'Sent to BCN for review. No request is guaranteed airtime.' });
     } catch (error) {
       const status = error instanceof SyntaxError ? 400 : /full/i.test(error.message) ? 429 : 400;

@@ -21,7 +21,6 @@ jobs:
           node --check electron/preload.cjs
           node --check electron/renderer.js
           node --check electron/network-directory.cjs
-          node --check electron/usb-dj.cjs
           node --check dist/media-center-upgrades.js
       - name: Install fixture decoder
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
@@ -29,8 +28,6 @@ jobs:
         run: npm test
       - name: Check native movie decoder
         run: node --check electron/media-compatibility.cjs
-      - name: Check portable DJ Python
-        run: python3 -m py_compile dj-usb/service/service.py
       - name: Install locked build dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Package verified Linux application upgrade

@@ -26,7 +26,7 @@ DEFAULTS = {
         "openAiCompatibleUrl": "http://127.0.0.1:11435/v1/chat/completions"
     },
     "host": {
-        "name": "Webbie",
+        "name": "Nova",
         "style": "live-radio",
         "maxTransitionSeconds": 14,
         "backAnnounce": True,
@@ -58,7 +58,12 @@ def load_config():
             data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
         except Exception:
             data = {}
-    return deep_merge(DEFAULTS, data)
+    cfg = deep_merge(DEFAULTS, data)
+    # Webbie is the system assistant; BCN broadcasts use her on-air name, Nova.
+    # Migrate older portable manifests that explicitly named the DJ Webbie.
+    if str(cfg["host"].get("name", "")).strip().casefold() == "webbie":
+        cfg["host"]["name"] = "Nova"
+    return cfg
 
 def clean(value, limit=160):
     return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
@@ -76,7 +81,7 @@ def fallback_script(payload, cfg):
     current = payload.get("currentTrack") or {}
     nxt = payload.get("nextTrack") or {}
     station = cfg["station"]["shortName"] or "BCN"
-    host = cfg["host"]["name"] or "Webbie"
+    host = cfg["host"]["name"] or "Nova"
     current_title = clean(current.get("title"), 90)
     current_artist = clean(current.get("artist"), 70)
     next_title = clean(nxt.get("title"), 90)

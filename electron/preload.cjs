@@ -6,6 +6,12 @@ contextBridge.exposeInMainWorld('spider', {
   appInfo: () => invoke('app:info'),
   novaHealth: () => invoke('nova:health'),
   novaPrepare: (payload) => invoke('nova:prepare', payload),
+  bcnDeskState: () => invoke('bcn:desk-state'),
+  bcnAddShow: (value) => invoke('bcn:desk-add-show', value),
+  bcnRemoveShow: (id) => invoke('bcn:desk-remove-show', id),
+  bcnAddRequest: (text) => invoke('bcn:desk-add-request', text),
+  bcnReviewRequest: (id, approved) => invoke('bcn:desk-review-request', id, approved),
+
   chooseMedia: () => invoke('media:choose'),
   prepareMovie: (url) => invoke('media:prepare-compatibility', url),
   cancelMoviePreparation: () => invoke('media:cancel-compatibility'),

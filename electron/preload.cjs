@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('spider', {
   novaHealth: () => invoke('nova:health'),
   novaPrepare: (payload) => invoke('nova:prepare', payload),
   bcnDeskState: () => invoke('bcn:desk-state'),
+  bcnSetListenerIntake: (enabled) => invoke('bcn:listener-intake', enabled),
   bcnAddShow: (value) => invoke('bcn:desk-add-show', value),
   bcnRemoveShow: (id) => invoke('bcn:desk-remove-show', id),
   bcnAddRequest: (text) => invoke('bcn:desk-add-request', text),

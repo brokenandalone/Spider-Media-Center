@@ -9,7 +9,7 @@ Spider Media Center is evolving from a desktop player into the playback and broa
 3. Add international radio discovery for talk, news, speech and music stations.
 4. Load M3U/M3U8 IPTV playlists, including the public iptv-org catalog.
 5. Use VLC/libVLC as the compatibility layer for formats and network protocols Chromium cannot reliably play.
-6. Make the AI DJ portable so its runtime, prompts, voice assets and optional model can live on a USB drive.
+6. Use the native Spider OS AI DJ runtime instead of a separate USB DJ.
 7. Make the AI DJ behave like a radio host, not a text-to-speech announcement button.
 
 ## Playback architecture
@@ -83,31 +83,15 @@ Public-facing labels should use:
 
 Internal IPC/channel names may remain `radio:*` for compatibility until a later cleanup.
 
-## Portable AI DJ
+## Native Nova AI DJ
 
-The preferred removable-drive layout is:
+**Nova** is Webbie's on-air persona for BCN Radio. Webbie retains her identity outside the radio-host context.
 
-```text
-SPIDER_DJ/
-├── spider-dj.json
-├── service/
-│   ├── service.py
-│   ├── prompts/
-│   └── voices/
-├── model/
-│   └── optional-model.gguf
-├── bin/
-│   └── optional llama-server
-└── logs/
-```
+The DJ runs as a native Spider OS service on `127.0.0.1:9876`, not from a removable drive. It uses the existing local model and speech tools. The service accepts `POST /dj/prepare` with current and next track metadata and returns a spoken script and generated audio URL.
 
-The Media Center discovers a drive only when it contains the manifest file. It must never execute arbitrary files merely because a USB drive was inserted.
+Spider Media Center owns scheduling, speech playback, music ducking, crossfades and broadcast routing. The installed DJ service and Media Center still need joint validation before unattended 24/7 operation is claimed.
 
-### Runtime modes
-
-1. **Portable local mode**: bundled GGUF + llama.cpp + local voice assets.
-2. **Spider OS mode**: service files on USB, model supplied by local Ollama.
-3. **Fallback mode**: no AI model, but deterministic station IDs, liners and emergency continuity remain available.
+The abandoned USB discovery and portable DJ runtime have been removed from Media Center. No USB setup or second DJ service is required.
 
 ## Real DJ behavior
 

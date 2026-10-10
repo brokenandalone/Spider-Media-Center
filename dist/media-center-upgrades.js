@@ -452,6 +452,20 @@
     const showStatus = el('p', { className: 'bcn-muted', text: 'Show schedule uses Spider OS local time.' });
     const showList = el('div', { className: 'bcn-results' });
     const requestStatus = el('p', { className: 'bcn-muted', text: 'Only approved entries can be spoken by Nova.' });
+    let listenerIntakeEnabled = false;
+    const listenerIntakeButton = el('button', {
+      type: 'button', className: 'bcn-small-button',
+      text: 'Open listener submissions',
+      onclick: async () => {
+        listenerIntakeButton.disabled = true;
+        try {
+          const result = await window.spider.bcnSetListenerIntake(!listenerIntakeEnabled);
+          renderProgramming(result);
+        } catch (error) {
+          requestStatus.textContent = error?.message || String(error);
+        } finally { listenerIntakeButton.disabled = false; }
+      }
+    });
     const requestList = el('div', { className: 'bcn-results' });
 
     const showDay = el('select');
@@ -473,6 +487,9 @@
     const renderProgramming = snapshot => {
       const current = snapshot.currentShow;
       const next = snapshot.upcomingShow;
+      listenerIntakeEnabled = snapshot.listenerRequestsEnabled === true;
+      listenerIntakeButton.textContent = listenerIntakeEnabled
+        ? 'Close listener submissions' : 'Open listener submissions';
       showStatus.textContent = current
         ? 'Scheduled now: ' + current.name + '. Time zone: ' + snapshot.timeZone
         : 'No scheduled show is active. Next: ' +
@@ -517,10 +534,10 @@
           }
         }
         requestList.append(el('div', { className: 'bcn-result-card' },
-          el('span', { text: request.text + ' · ' + request.status }),
+          el('span', { text: request.text + ' · ' + request.status + ' · ' + (request.source === 'listener' ? 'listener submission' : 'operator entry') }),
           actions));
       });
-      requestStatus.textContent = 'Pending requires approval. Prepared means Nova generated a break, not confirmed airtime.';
+      requestStatus.textContent = (listenerIntakeEnabled ? 'Listener submissions open. ' : 'Listener submissions closed. ') + 'Pending requires approval. Prepared is not confirmed airtime.';
     };
     const refreshProgramming = async () => {
       try { renderProgramming(await window.spider.bcnDeskState()); }
@@ -597,6 +614,7 @@
       ),
       el('div', { className: 'bcn-section' },
         el('h3', { text: 'BCN Request Desk' }),
+        el('div', { className: 'bcn-row' }, listenerIntakeButton),
         el('p', { className: 'bcn-muted', text: 'Operator-entered requests only. Future listener-submission integration will require explicit moderation; nothing is announced until you approve it.' }),
         requestStatus,
         el('div', { className: 'bcn-row' }, requestText, addRequestButton),
@@ -608,6 +626,13 @@
       panel.classList.toggle('bcn-hidden');
       if (!panel.classList.contains('bcn-hidden')) { void refreshNova(); void refreshProgramming(); }
     });
+    if (window.spider?.onRadioEvent) {
+      window.spider.onRadioEvent(event => {
+        if (event?.type === 'bcn-listener-request' || event?.type === 'stopped') {
+          void refreshProgramming();
+        }
+      });
+    }
     document.body.append(launcher, panel);
 
   }

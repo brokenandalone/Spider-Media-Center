@@ -211,6 +211,14 @@ The proposed USB-portable DJ was never deployed and was removed to avoid maintai
 
 The existing compiled **Nova DJ Control** panel remains the user-facing control (enable, DJ break frequency, lead time, voice volume and ducking). Its loopback requests are bridged through secure Electron IPC to the native `127.0.0.1:9876/dj/prepare` service. Only generated files inside the native DJ cache can be loaded; Media Center returns them as bounded in-memory audio. Nova's spoken breaks use the same Web Audio context and `broadcastDestination` as the music decks, reaching both local speakers and BCN's listener stream. Missing services and late/skipped announcements do not stop music.
 
+### BCN Show Clock and Request Desk
+
+The BCN Media panel now includes a **local-time weekly show schedule** and an **operator-only request desk**. Schedules are saved privately in Electron's user-data directory and pass the active show name and voice tone into Nova's next prepared announcement. On the first eligible DJ break in a show, Nova prepares a show introduction; the first break after the block ends can close that show. Overnight programs must be entered as separate blocks on each side of midnight.
+
+Requests begin **pending**. An operator must approve them before their wording is passed to Nova. Approvals can be withdrawn before audio is generated. A request marked **prepared** has been used in generated voice audio; it does not prove that audio aired. Public listener-submission endpoints and automated moderation have not been enabled.
+
+The show clock **does not start a broadcast**, change the rights-confirmation workflow, or play unauthorized music. The broadcaster must start and stop BCN deliberately.
+
 Automation and streaming still require an end-to-end installed Spider OS broadcast test before unattended operation is considered verified.
 
 Spider Media Center will not launch VLC as an external fallback player; VideoLAN technology is treated as an upstream source/embedded engine option inside Spider's own playback stack.

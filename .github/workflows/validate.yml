@@ -24,6 +24,7 @@ jobs:
           node --check electron/network-directory.cjs
           node --check electron/nova-service.cjs
           node --check electron/bcn-desk.cjs
+          node --check electron/bcn-listener-intake.cjs
           node --check dist/assets/index-Dt0TTW2G.js
           node --check dist/media-center-upgrades.js
       - name: Validate one-command Spider OS installer

@@ -24,6 +24,10 @@
       }
       const result = await window.spider.novaPrepare(request);
       if (options.signal?.aborted) throw new DOMException('DJ request aborted', 'AbortError');
+      const now = window.__spiderPlayerBridge?.getAIDJSnapshot?.()?.current;
+      if (request.currentTrack?.id && now?.id && request.currentTrack.id !== now.id) {
+        throw new Error('Song changed before Nova completed the DJ break');
+      }
       window.__spiderLastDjTalkOver = result.talkOver || null;
       return new Response(JSON.stringify(result), {
         status: 200, headers: { 'Content-Type': 'application/json' }
@@ -31,7 +35,7 @@
     }
     const response = await nativeFetch(...args);
     try {
-      if (/\\/dj\\/prepare(?:$|\\?)/.test(target)) {
+      if (target.includes('/dj/prepare')) {
         response.clone().json().then(payload => {
           window.__spiderLastDjTalkOver = payload?.talkOver || null;
         }).catch(() => {});

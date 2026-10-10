@@ -1,13 +1,38 @@
 (() => {
   const IPTV_DEFAULT = 'https://iptv-org.github.io/iptv/index.m3u';
 
+  // Preserve the compiled Kabel AI DJ controller, but route its standard
+  // loopback service call through Electron IPC. This avoids Chromium file://
+  // CORS/PNA issues and makes the voice audio available to the BCN mixer.
   const nativeFetch = window.fetch.bind(window);
   window.fetch = async (...args) => {
+    const target = String(args[0]?.url || args[0] || '');
+    const options = args[1] || {};
+    let url;
+    try { url = new URL(target); } catch { }
+    const nativeNovaEndpoint = url
+      && url.protocol === 'http:'
+      && (url.hostname === '127.0.0.1' || url.hostname === 'localhost')
+      && url.port === '9876'
+      && url.pathname === '/dj/prepare';
+    if (nativeNovaEndpoint && window.spider?.novaPrepare) {
+      if (options.signal?.aborted) throw new DOMException('DJ request aborted', 'AbortError');
+      const request = JSON.parse(String(options.body || '{}'));
+      if (!Number.isFinite(Number(request.secondsRemaining))) {
+        const current = request.currentTrack || {};
+        request.secondsRemaining = Math.max(0, Number(current.duration || 0) - Number(current.currentTime || 0));
+      }
+      const result = await window.spider.novaPrepare(request);
+      if (options.signal?.aborted) throw new DOMException('DJ request aborted', 'AbortError');
+      window.__spiderLastDjTalkOver = result.talkOver || null;
+      return new Response(JSON.stringify(result), {
+        status: 200, headers: { 'Content-Type': 'application/json' }
+      });
+    }
     const response = await nativeFetch(...args);
     try {
-      const target = String(args[0]?.url || args[0] || '');
-      if (/\/dj\/prepare(?:$|\?)/.test(target)) {
-        response.clone().json().then((payload) => {
+      if (/\\/dj\\/prepare(?:$|\\?)/.test(target)) {
+        response.clone().json().then(payload => {
           window.__spiderLastDjTalkOver = payload?.talkOver || null;
         }).catch(() => {});
       }

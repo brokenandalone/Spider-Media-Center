@@ -18,6 +18,11 @@
     if (nativeNovaEndpoint && window.spider?.novaPrepare) {
       if (options.signal?.aborted) throw new DOMException('DJ request aborted', 'AbortError');
       const request = JSON.parse(String(options.body || '{}'));
+      const broadcast = window.__spiderPlayerBridge?.getRadioState?.() || {};
+      request.context = {
+        ...(request.context && typeof request.context === 'object' ? request.context : {}),
+        showName: broadcast.active ? String(broadcast.currentShow || broadcast.show || 'BCN Live') : 'BCN Live'
+      };
       if (!Number.isFinite(Number(request.secondsRemaining))) {
         const current = request.currentTrack || {};
         request.secondsRemaining = Math.max(0, Number(current.duration || 0) - Number(current.currentTime || 0));

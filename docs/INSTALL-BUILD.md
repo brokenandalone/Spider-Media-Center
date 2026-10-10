@@ -11,6 +11,8 @@ and Python service, and runs a native DJ health check. It does not touch Webbie
 or the separate, known-good Spider Media Player.
 
 The native Nova service recognizes station IDs, liners and show introductions.
+Real BCN listener submissions and the optional session-only continuity guard now live in this Media Center upgrade too. Listener submissions start **closed** and are exposed only while the operator has an active public broadcast and explicitly opens requests; they arrive as pending and never bypass approval. The guard requires existing BCN/AutoDJ operation and a rights confirmation, limits recovery attempts and disarms if radio stops. Neither feature starts public broadcasting on its own, and remote/mobile and actual audio mixing still require physical-device validation.
+
 The BCN Show Clock and Request Desk live in the Media Center upgrade itself. The
 scheduler only chooses *spoken context* during eligible DJ transitions; it
 does not start/stop broadcasts or automate DJ-on-air status. Weekly show

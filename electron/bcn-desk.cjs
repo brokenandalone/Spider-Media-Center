@@ -63,6 +63,7 @@ class BcnDesk {
     this.clock = options.clock || (() => new Date());
     this.shows = [];
     this.requests = [];
+    this.listenerRequestsEnabled = false; // never arm public intake on app restart
     this.lastShowKey = null;
     this.lastShowName = null;
     if (this.file) this.load();
@@ -84,6 +85,7 @@ class BcnDesk {
         .map(r => ({
           id: /^[a-f0-9-]{10,60}$/i.test(String(r.id)) ? r.id : crypto.randomUUID(),
           text: clean(r.text, 180),
+          source: r.source === 'listener' ? 'listener' : 'operator',
           status: ['pending', 'approved', 'prepared', 'rejected'].includes(r.status) ? r.status : 'pending',
           createdAt: clean(r.createdAt, 40)
         })).filter(r => r.text);
@@ -114,6 +116,7 @@ class BcnDesk {
       upcomingShow: nextShow(this.shows, now),
       shows: this.shows.map(s => ({ ...s })),
       requests: this.requests.map(r => ({ ...r })),
+      listenerRequestsEnabled: this.listenerRequestsEnabled,
       liveBroadcastControlledSeparately: true
     };
   }
@@ -133,13 +136,21 @@ class BcnDesk {
     this.save();
     return this.state();
   }
-  addRequest(text) {
+  setListenerRequestsEnabled(enabled) {
+    this.listenerRequestsEnabled = enabled === true;
+    return this.state();
+  }
+  addListenerRequest(text) {
+    if (!this.listenerRequestsEnabled) throw new Error('BCN listener requests are closed');
+    return this.addRequest(text, 'listener');
+  }
+  addRequest(text, source = 'operator') {
     text = clean(text, 180);
     if (text.length < 3) throw new Error('Enter a listener request or dedication');
     if (this.requests.filter(r => r.status === 'pending' || r.status === 'approved').length >= MAX_REQUESTS) {
       throw new Error('BCN request queue is full');
     }
-    this.requests.push({ id: crypto.randomUUID(), text, status: 'pending', createdAt: this.clock().toISOString() });
+    this.requests.push({ id: crypto.randomUUID(), text, source: source === 'listener' ? 'listener' : 'operator', status: 'pending', createdAt: this.clock().toISOString() });
     this.requests = this.requests.slice(-MAX_REQUESTS);
     this.save();
     return this.state();

@@ -430,6 +430,106 @@
       }
     });
 
+    // Session-only continuity guard. Never auto-publish, relaunch a public
+    // tunnel, play unqueued media or bypass the operator's rights confirmation.
+    let continuityArmed = false;
+    let continuityPausedAt = 0;
+    let continuityAttempts = 0;
+    let continuityHealthyAt = 0;
+    const continuityRights = el('input', { type: 'checkbox', 'aria-label': 'Confirm BCN broadcast rights for queued music' });
+    const continuityStatus = el('p', {
+      className: 'bcn-muted',
+      text: 'Disarmed. Start BCN and AutoDJ manually, then arm continuity.'
+    });
+    const continuityButton = el('button', {
+      type: 'button', className: 'bcn-small-button', text: 'Arm continuity',
+      onclick: () => {
+        if (continuityArmed) {
+          disarmContinuity('Disarmed by operator.');
+          return;
+        }
+        const bridge = window.__spiderPlayerBridge;
+        const dj = window.__spiderAutoDJ;
+        if (!continuityRights.checked) {
+          continuityStatus.textContent = 'Confirm broadcast rights for your queued content first.';
+          return;
+        }
+        if (!bridge?.getRadioState?.()?.active || !dj?.isRunning?.()) {
+          continuityStatus.textContent = 'Start BCN broadcasting and AutoDJ before arming.';
+          return;
+        }
+        const eligible = bridge.getBroadcastRecoveryState?.()?.fallbackCount || 0;
+        if (eligible < 2 || !bridge.triggerBroadcastRecovery) {
+          continuityStatus.textContent = 'Continuity requires at least two playable, authorized queued tracks.';
+          return;
+        }
+        bridge.setBroadcastRecovery?.({ enabled: true, silenceThresholdMs: 8000 });
+        continuityArmed = true;
+        continuityPausedAt = 0;
+        continuityAttempts = 0;
+        continuityHealthyAt = Date.now();
+        continuityButton.textContent = 'Disarm continuity';
+        continuityStatus.textContent = 'Armed for this app session. BCN must remain live. Automatic playback recovery is enabled.';
+      }
+    });
+    function disarmContinuity(reason) {
+      continuityArmed = false;
+      continuityPausedAt = 0;
+      continuityAttempts = 0;
+      continuityButton.textContent = 'Arm continuity';
+      continuityStatus.textContent = reason || 'Continuity disarmed.';
+    }
+    const checkContinuity = () => {
+      if (!continuityArmed) return;
+      const bridge = window.__spiderPlayerBridge;
+      if (!bridge?.getRadioState?.()?.active) {
+        disarmContinuity('BCN went off air. Continuity was disarmed; public broadcasting was not restarted.');
+        return;
+      }
+      if (!continuityRights.checked || !window.__spiderAutoDJ?.isRunning?.()) {
+        disarmContinuity('Rights confirmation or AutoDJ was turned off. Continuity was disarmed.');
+        return;
+      }
+      const fallback = bridge.getBroadcastRecoveryState?.()?.fallbackCount || 0;
+      if (fallback < 2) {
+        disarmContinuity('Too few playable tracks remain. Continuity was disarmed.');
+        return;
+      }
+      const player = bridge.getAIDJSnapshot?.() || {};
+      const dj = bridge.getAIDJConfig?.() || {};
+      if (dj.pendingBreak || dj.liveBreakActive) {
+        continuityPausedAt = 0;
+        return;
+      }
+      if (!player.paused && player.current) {
+        continuityPausedAt = 0;
+        if (Date.now() - continuityHealthyAt >= 30000) {
+          continuityAttempts = 0;
+          continuityHealthyAt = Date.now();
+        }
+        continuityStatus.textContent = 'Guard armed. Music is playing; BCN is under continuity supervision.';
+        return;
+      }
+      if (!continuityPausedAt) continuityPausedAt = Date.now();
+      if (Date.now() - continuityPausedAt < 15000) {
+        continuityStatus.textContent = 'Playback paused. Continuity checking for persistent dead air…';
+        return;
+      }
+      continuityPausedAt = Date.now();
+      if (++continuityAttempts > 3) {
+        disarmContinuity('Three unsuccessful recovery attempts. Operator attention required.');
+        return;
+      }
+      try {
+        const started = bridge.triggerBroadcastRecovery();
+        continuityStatus.textContent = started
+          ? 'Attempting queued-track recovery (' + continuityAttempts + '/3).'
+          : 'Unable to find another playable track (' + continuityAttempts + '/3).';
+      } catch {
+        continuityStatus.textContent = 'Recovery error (' + continuityAttempts + '/3).';
+      }
+    };
+
     const novaStatus = el('p', { className: 'bcn-muted', text: 'Nova runs through the native Spider OS DJ service.' });
     const refreshNova = async () => {
       novaStatus.textContent = 'Checking Nova on Spider OS…';
@@ -606,6 +706,15 @@
         checkNova
       ),
       el('div', { className: 'bcn-section' },
+        el('h3', { text: 'BCN Continuity Guard' }),
+        el('p', { className: 'bcn-muted',
+          text: 'Optional session-only recovery for an already-live BCN broadcast and running AutoDJ. Never starts a broadcast or chooses new music. Paused playback may be resumed from your existing queue after 15 seconds.' }),
+        el('label', { className: 'bcn-row' }, continuityRights,
+          el('span', { text: 'I have broadcasting rights for the queued material.' })),
+        continuityStatus,
+        continuityButton
+      ),
+      el('div', { className: 'bcn-section' },
         el('h3', { text: 'BCN Show Clock' }),
         el('p', { className: 'bcn-muted', text: 'Set Nova’s on-air show identity by Spider OS local time. Scheduling announcements does not start or stop a public broadcast. Split overnight blocks at midnight.' }),
         showStatus,
@@ -628,11 +737,13 @@
     });
     if (window.spider?.onRadioEvent) {
       window.spider.onRadioEvent(event => {
+        if (event?.type === 'stopped') disarmContinuity('BCN stopped. Continuity was disarmed.');
         if (event?.type === 'bcn-listener-request' || event?.type === 'stopped') {
           void refreshProgramming();
         }
       });
     }
+    window.setInterval(checkContinuity, 5000);
     document.body.append(launcher, panel);
 
   }

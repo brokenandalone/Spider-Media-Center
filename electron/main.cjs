@@ -22,6 +22,8 @@ const {
   searchRadioStations
 } = require('./network-directory.cjs');
 const { MediaCompatibility } = require('./media-compatibility.cjs');
+const { nativeNova } = require('./nova-service.cjs');
+const nova = nativeNova();
 let mediaCompatibility;
 function compatibility() {
   const configured = process.env.XDG_CACHE_HOME;
@@ -1185,6 +1187,15 @@ async function startRadioServer(profile) {
 }
 
 ipcMain.handle('app:info', () => ({ version: app.getVersion(), packaged: app.isPackaged }));
+ipcMain.handle('nova:health', (event) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error('Untrusted Nova health request');
+  return nova.health();
+});
+ipcMain.handle('nova:prepare', (event, payload) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error('Untrusted Nova DJ request');
+  return nova.prepare(payload);
+});
+
 ipcMain.handle('media:prepare-compatibility', async (event, url) => {
   if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error('Untrusted playback request.');
   return compatibility().prepare(url, progress => {

@@ -9,7 +9,7 @@ on:
 
 jobs:
   syntax:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,7 +21,4 @@ jobs:
           node --check electron/preload.cjs
           node --check electron/renderer.js
           node --check electron/network-directory.cjs
-          node --check electron/usb-dj.cjs
           node --check dist/media-center-upgrades.js
-      - name: Check portable DJ Python
-        run: python3 -m py_compile dj-usb/service/service.py

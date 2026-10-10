@@ -425,6 +425,23 @@
       }
     });
 
+    const novaStatus = el('p', { className: 'bcn-muted', text: 'Nova runs through the native Spider OS DJ service.' });
+    const refreshNova = async () => {
+      novaStatus.textContent = 'Checking Nova on Spider OS…';
+      try {
+        const result = await window.spider.novaHealth();
+        novaStatus.textContent = result?.ok
+          ? 'Nova DJ: connected to Spider OS. Enable DJ breaks in Nova DJ Control.'
+          : 'Nova DJ: the local service is not ready.';
+      } catch {
+        novaStatus.textContent = 'Nova DJ: offline. Music and BCN broadcasting remain available.';
+      }
+    };
+    const checkNova = el('button', {
+      type: 'button', className: 'bcn-small-button',
+      text: 'Check Nova DJ', onclick: refreshNova
+    });
+
     panel.append(
       close,
       el('header', { className: 'bcn-panel-header' },
@@ -455,10 +472,18 @@
         el('h3', { text: 'Web Media' }),
         el('p', { className: 'bcn-muted', text: 'Use Open website for a normal web page. Use Play direct stream only for an actual audio/video stream URL such as MP3, AAC, HLS/M3U8 or a direct media endpoint. A normal website URL is not itself a media stream.' }),
         el('div', { className: 'bcn-row' }, webUrl, openWebsite, playDirect)
+      ),
+      el('div', { className: 'bcn-section' },
+        el('h3', { text: 'Nova · Native AI DJ' }),
+        novaStatus,
+        checkNova
       )
     );
 
-    launcher.addEventListener('click', () => panel.classList.toggle('bcn-hidden'));
+    launcher.addEventListener('click', () => {
+      panel.classList.toggle('bcn-hidden');
+      if (!panel.classList.contains('bcn-hidden')) void refreshNova();
+    });
     document.body.append(launcher, panel);
 
   }

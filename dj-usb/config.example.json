@@ -16,7 +16,7 @@
     "llamaServerPath": "bin/llama-server"
   },
   "host": {
-    "name": "Webbie",
+    "name": "Nova",
     "style": "live-radio",
     "maxTransitionSeconds": 14,
     "backAnnounce": true,

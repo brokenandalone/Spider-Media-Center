@@ -207,7 +207,11 @@ BCN broadcasting and international media discovery are part of Spider Media Cent
 - Native Spider OS AI DJ service (normally `http://127.0.0.1:9876`) with **Nova** as Webbie's on-air DJ name
 - Planned live-radio hosting with show-clock scheduling, back-announces, front-sells, liners, requests and reliable mix timing
 
-The proposed USB-portable DJ was never deployed and was removed to avoid maintaining a second runtime. Nova uses the native Spider OS service. Automated broadcast integration still requires end-to-end testing.
+The proposed USB-portable DJ was never deployed and was removed to avoid maintaining a second runtime. Nova uses the native Spider OS service.
+
+The existing compiled **Nova DJ Control** panel remains the user-facing control (enable, DJ break frequency, lead time, voice volume and ducking). Its loopback requests are bridged through secure Electron IPC to the native `127.0.0.1:9876/dj/prepare` service. Only generated files inside the native DJ cache can be loaded; Media Center returns them as bounded in-memory audio. Nova's spoken breaks use the same Web Audio context and `broadcastDestination` as the music decks, reaching both local speakers and BCN's listener stream. Missing services and late/skipped announcements do not stop music.
+
+Automation and streaming still require an end-to-end installed Spider OS broadcast test before unattended operation is considered verified.
 
 Spider Media Center will not launch VLC as an external fallback player; VideoLAN technology is treated as an upstream source/embedded engine option inside Spider's own playback stack.
 

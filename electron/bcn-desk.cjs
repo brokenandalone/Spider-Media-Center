@@ -146,7 +146,9 @@ class BcnDesk {
   }
   reviewRequest(id, approve) {
     const request = this.requests.find(r => r.id === id);
-    if (!request || request.status !== 'pending') throw new Error('Only pending requests can be reviewed');
+    if (!request || (request.status !== 'pending' && !(request.status === 'approved' && approve === false))) {
+      throw new Error('Only pending or still-approved requests can be reviewed');
+    }
     request.status = approve === true ? 'approved' : 'rejected';
     this.save();
     return this.state();

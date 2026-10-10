@@ -158,7 +158,7 @@ class BcnDesk {
     const current = matchShow(this.shows, this.clock());
     const key = current ? current.id : null;
     const explicit = String(payload.type || 'transition') !== 'transition';
-    const next = { ...payload, context: { ...(payload.context && typeof payload.context === 'object' && !Array.isArray(payload.context) ? payload.context : {}) } };
+    const next = { ...payload, request: { approved: false }, context: { ...(payload.context && typeof payload.context === 'object' && !Array.isArray(payload.context) ? payload.context : {}) } };
     if (current) {
       next.context.showName = current.name;
       next.context.tone = current.tone;

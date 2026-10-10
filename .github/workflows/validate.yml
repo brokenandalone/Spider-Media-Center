@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - feature/bcn-network-ai-dj
+      - 'upgrades/**'
   pull_request:
 
 jobs:

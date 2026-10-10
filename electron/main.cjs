@@ -25,6 +25,7 @@ const { MediaCompatibility } = require('./media-compatibility.cjs');
 const { nativeNova } = require('./nova-service.cjs');
 const nova = nativeNova();
 const { BcnDesk } = require('./bcn-desk.cjs');
+const { BcnListenerIntake } = require('./bcn-listener-intake.cjs');
 let bcnDesk;
 function programmingDesk() {
   return bcnDesk ||= new BcnDesk({ file: path.join(app.getPath('userData'), 'bcn-desk.json') });
@@ -112,6 +113,7 @@ const serviceWindows = new Map();
 const sharedFiles = new Map();
 const radioListeners = new Map();
 let radioServer;
+let radioRequestIntake;
 let radioTunnel;
 let radioState = { active: false, listenerCount: 0 };
 let remoteServer;
@@ -1046,6 +1048,8 @@ async function stopRadioServer() {
     try { response.end(); } catch { }
   }
   radioListeners.clear();
+  radioRequestIntake = undefined;
+  if (bcnDesk) bcnDesk.setListenerRequestsEnabled(false);
   if (radioTunnel) {
     radioTunnel.kill();
     radioTunnel = undefined;
@@ -1064,6 +1068,11 @@ async function startRadioServer(profile) {
   await stopRadioServer();
   if (process.env.SPIDER_RADIO_TEST_LOCAL !== '1' && !fs.existsSync(CLOUDFLARED_PATH)) throw new Error('The Spider public relay is not installed.');
   const token = crypto.randomBytes(20).toString('hex');
+  programmingDesk().setListenerRequestsEnabled(false);
+  radioRequestIntake = new BcnListenerIntake({
+    desk: programmingDesk(),
+    onAccepted: () => sendRadioEvent({ type: 'bcn-listener-request' })
+  });
   radioState = {
     active: true,
     name: String(profile && profile.name || 'Spider Radio').trim().slice(0, 80) || 'Spider Radio',
@@ -1097,8 +1106,13 @@ async function startRadioServer(profile) {
         dj: radioState.dj,
         description: radioState.description,
         listenerCount: radioListeners.size,
-        nowPlaying: radioState.nowPlaying
+        nowPlaying: radioState.nowPlaying,
+        listenerRequestsEnabled: programmingDesk().listenerRequestsEnabled
       });
+      return;
+    }
+    if (url.pathname === `/request/${token}` && request.method === 'POST') {
+      void radioRequestIntake.accept(request, response);
       return;
     }
     if (request.method === 'GET' && url.pathname === `/stream/${token}`) {
@@ -1213,6 +1227,13 @@ ipcMain.handle('bcn:desk-add-show', (event, value) => {
 ipcMain.handle('bcn:desk-remove-show', (event, id) => {
   trustedMediaSender(event);
   return programmingDesk().removeShow(id);
+});
+ipcMain.handle('bcn:listener-intake', (event, enabled) => {
+  trustedMediaSender(event);
+  if (enabled === true && radioState.active !== true) {
+    throw new Error('Start BCN Radio before opening listener submissions');
+  }
+  return programmingDesk().setListenerRequestsEnabled(enabled === true);
 });
 ipcMain.handle('bcn:desk-add-request', (event, value) => {
   trustedMediaSender(event);

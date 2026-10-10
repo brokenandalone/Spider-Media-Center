@@ -622,7 +622,7 @@
           restoreStatus.textContent = 'Relay restoration failed: ' + (error?.message || String(error));
           await refreshSignal();
         } finally {
-          restoreRelay.disabled = false;
+          restoreRelay.disabled = !recoveryState?.available;
         }
       }
     });

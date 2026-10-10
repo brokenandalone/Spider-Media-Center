@@ -40,8 +40,8 @@ function nextAIDJTrack() {
 // platform media-key IPC events from the main process.
 try {
   if ('mediaSession' in navigator) {
-    try { navigator.mediaSession.setActionHandler('play', () => window.__spiderPlayerBridge?.togglePlay?.()); } catch {}
-    try { navigator.mediaSession.setActionHandler('pause', () => window.__spiderPlayerBridge?.togglePlay?.()); } catch {}
+    try { navigator.mediaSession.setActionHandler('play', () => { if (!activeMedia() || activeMedia().paused) void togglePlay(); }); } catch {}
+    try { navigator.mediaSession.setActionHandler('pause', () => { const deck = activeMedia(); if (deck && !deck.paused) deck.pause(); }); } catch {}
     try { navigator.mediaSession.setActionHandler('previoustrack', () => window.__spiderPlayerBridge?.previous?.()); } catch {}
     try { navigator.mediaSession.setActionHandler('nexttrack', () => window.__spiderPlayerBridge?.next?.()); } catch {}
     try { navigator.mediaSession.setActionHandler('seekbackward', (details) => window.__spiderPlayerBridge?.back?.((details && details.seekOffset) || 10)); } catch {}
@@ -90,10 +90,11 @@ const IS_REACT_UI = Boolean(
 // check `IS_REACT_UI` or guard selectors before accessing returned nodes.
 
 const decks = [null, null];
+const deckSources = new WeakMap();
 
 function resolveDecks() {
-  if (!decks[0]) decks[0] = $('#deckA');
-  if (!decks[1]) decks[1] = $('#deckB');
+  if (!decks[0] || decks[0].isConnected === false) decks[0] = $('#deckA');
+  if (!decks[1] || decks[1].isConnected === false) decks[1] = $('#deckB');
   return decks;
 }
 
@@ -380,7 +381,7 @@ let lastVisualizerFrameAt = 0;
 
 function toast(message) {
   if (IS_REACT_UI) {
-    try { console.log('toast:', message); } catch {}
+    window.dispatchEvent(new CustomEvent('spider:notice', { detail: { message } }));
     return;
   }
 
@@ -445,7 +446,8 @@ function syncMediaStageForItem(item) {
   });
 }
 
-function applyDeckVolume(deck, gain = Number(deck.dataset.gain || 1)) {
+function applyDeckVolume(deck, gain = Number(deck?.dataset.gain || 1)) {
+  if (!deck) return;
   deck.dataset.gain = String(gain);
   const micDuckFactor = state.djMic.duckingActive ? 10 ** (-state.djMic.duckDb / 20) : 1;
   const aiDjDuckFactor = state.aiDj.duckingActive
@@ -457,18 +459,25 @@ function applyDeckVolume(deck, gain = Number(deck.dataset.gain || 1)) {
 
 function ensureAudioEngine() {
   resolveDecks();
-  if (state.audioContext) {
-    if (state.audioContext.state === 'suspended') void state.audioContext.resume();
+  if (decks.some((deck) => !deck)) return null;
+  if (state.audioContext && state.audioGraphs.length === decks.length && state.audioGraphs.every((graph, index) => graph.deck === decks[index])) {
+    if (state.audioContext.state === 'suspended') void state.audioContext.resume().catch(error => console.warn('Audio resume failed', error));
     return state.audioContext;
   }
 
   const AudioContext = window.AudioContext || window.webkitAudioContext;
   if (!AudioContext) return null;
-  const context = new AudioContext();
+  const context = state.audioContext || new AudioContext();
   state.audioContext = context;
-  state.broadcastDestination = context.createMediaStreamDestination();
+  state.broadcastDestination ||= context.createMediaStreamDestination();
+  try {
   state.audioGraphs = decks.map((deck) => {
-    const source = context.createMediaElementSource(deck);
+    let source = deckSources.get(deck);
+    if (!source) {
+      source = context.createMediaElementSource(deck);
+      deckSources.set(deck, source);
+    }
+    source.disconnect();
     const filters = EQ_FREQUENCIES.map((frequency, index) => {
       const filter = context.createBiquadFilter();
       filter.type = index === 0 ? 'lowshelf' : index === EQ_FREQUENCIES.length - 1 ? 'highshelf' : 'peaking';
@@ -518,6 +527,7 @@ function ensureAudioEngine() {
     analyser.connect(context.destination);
     analyser.connect(state.broadcastDestination);
     return {
+      deck,
       filters,
       preamp,
       outputGain,
@@ -530,19 +540,21 @@ function ensureAudioEngine() {
       waveData: new Uint8Array(analyser.fftSize)
     };
   });
-  // If the new audio engine scaffold is present, attach the deck audio elements
-  try {
-    if (window.__spiderAudioEngine && typeof window.__spiderAudioEngine.attachElement === 'function') {
-      decks.forEach((d) => { try { window.__spiderAudioEngine.attachElement(d) } catch {} });
-    } else if (window.__spiderPlayerBridge && typeof window.__spiderPlayerBridge.attachAllAudioElements === 'function') {
-      try { window.__spiderPlayerBridge.attachAllAudioElements() } catch {}
+  } catch (error) {
+    // A failed optional mixer must not strand media elements on a silent graph.
+    state.audioGraphs = [];
+    for (const deck of decks) {
+      const source = deckSources.get(deck);
+      if (source) { source.disconnect(); source.connect(context.destination); }
     }
-  } catch {}
+    console.warn('Mixer unavailable; using direct playback', error);
+    return context;
+  }
   applySoundSettings();
   if (state.outputDeviceId && typeof context.setSinkId === 'function') {
     void context.setSinkId(state.outputDeviceId).catch(() => {});
   }
-  void context.resume();
+  void context.resume().catch(error => console.warn('Audio resume failed', error));
   return context;
 }
 
@@ -697,7 +709,10 @@ function visualizerFrame(time) {
   updateDjMicMeter();
   evaluateBroadcastRecovery(time);
   const canvas = $('#visualizerCanvas');
-  if (!canvas) return;
+  if (!canvas) {
+    requestAnimationFrame(visualizerFrame);
+    return;
+  }
 
   const bounds = canvas.getBoundingClientRect();
   const scale = Math.min(window.devicePixelRatio || 1, 2);
@@ -710,6 +725,10 @@ function visualizerFrame(time) {
   }
 
   const context = canvas.getContext('2d');
+  if (!context || bounds.width <= 0 || bounds.height <= 0) {
+    requestAnimationFrame(visualizerFrame);
+    return;
+  }
   context.clearRect(0, 0, width, height);
 
   if (state.visualizerMode === 'off') {
@@ -718,7 +737,8 @@ function visualizerFrame(time) {
   }
 
   const graph = state.audioGraphs[state.activeDeck];
-  const live = graph && !activeMedia().paused;
+  const media = activeMedia();
+  const live = Boolean(graph && media && !media.paused);
   const frequencyData = graph ? graph.frequencyData : IDLE_FREQUENCY_DATA;
   const waveData = graph ? graph.waveData : IDLE_WAVE_DATA;
 
@@ -1460,11 +1480,7 @@ function getRadioStateSnapshot() {
   const item = currentItem();
   const title = item?.title || state.radio.nowPlaying || '';
   const artist = item?.artist || '';
-  const live = Boolean(
-    state.radio.active ||
-    state.radio.publicUrl ||
-    state.radio.qrDataUrl
-  );
+  const live = state.radio.active === true;
 
   const startedAt = state.radio.startedAt || null;
   const startedMs = typeof startedAt === 'number'
@@ -1512,8 +1528,7 @@ function getRadioStateSnapshot() {
 function updateNowPlaying() {
   const item = currentItem();
 
-  if (state.radio.active || state.radio.publicUrl || state.radio.qrDataUrl) {
-    state.radio.active = true;
+  if (state.radio.active === true) {
     state.radio.nowPlaying = item?.title || state.radio.nowPlaying || '';
     state.radio.connectionStatus = 'live';
   }
@@ -1652,17 +1667,22 @@ function prepareDeck(deck, item) {
         });
       }
     });
+    deck.addEventListener('error', () => {
+      const item = currentItem();
+      if (deck === activeMedia() && item?.id === deck.dataset.itemId) reportPlaybackError(item, deck.error?.message || 'The decoder could not read this source.');
+    });
     deck.addEventListener('pause', () => emitPlayerEvent('playbackPaused', { currentTrack: toAIDJTrack(currentItem(), deck) }));
     deck.addEventListener('play', () => emitPlayerEvent('playbackResumed', { currentTrack: toAIDJTrack(currentItem(), deck) }));
     deck.dataset.endedBound = '1';
   }
 
-  if (deck.dataset.itemId === item.id) return;
+  if (deck.dataset.itemId === item.id && deck.dataset.itemUrl === item.url) return;
   deck.pause();
   deck.removeAttribute('src');
   deck.load();
   deck.src = item.url;
   deck.dataset.itemId = item.id;
+  deck.dataset.itemUrl = item.url;
   deck.preload = 'auto';
   deck.load();
 }
@@ -1675,32 +1695,52 @@ function normalizeDJAudioUrl(value) {
 }
 
 async function playDJBreak(breakItem) {
-  const source = window.__spiderAudioEngine?.playBuffer;
-  if (typeof source !== 'function') return;
   const url = normalizeDJAudioUrl(breakItem.audioFile);
-  if (!url) return;
-
-  const duckLevel = Math.max(
-    0.05,
-    Math.min(1, Number(breakItem?.talkOver?.duckLevel) || state.aiDj.musicDuckLevel || 0.3)
-  );
-
+  if (!url || state.panicMuted || state.muted) return;
+  const context = ensureAudioEngine();
+  if (!context || !state.broadcastDestination) {
+    console.warn('Nova DJ cannot reach the broadcast audio graph');
+    return;
+  }
+  const duckLevel = Math.max(0.05, Math.min(1,
+    Number(breakItem?.talkOver?.duckLevel) || state.aiDj.musicDuckLevel || 0.3));
   state.aiDj.duckingActive = true;
   state.aiDj.activeDuckLevel = duckLevel;
   decks.forEach((deck) => applyDeckVolume(deck));
 
+  let voiceSource;
+  let voiceGain;
   try {
-    const audioSource = await source.call(window.__spiderAudioEngine, url, 0, { volume: state.aiDj.voiceVolume });
-    const duration = Number(audioSource?.buffer?.duration) || 12;
+    // Decode into the SAME context as the music/broadcast stream. The old
+    // separate SpiderAudioEngine context only reached local speakers.
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Nova audio could not be loaded');
+    const encoded = await response.arrayBuffer();
+    if (!encoded.byteLength || encoded.byteLength > 4 * 1024 * 1024) {
+      throw new Error('Nova audio is missing or unexpectedly large');
+    }
+    const audio = await context.decodeAudioData(encoded);
+    voiceSource = context.createBufferSource();
+    voiceSource.buffer = audio;
+    voiceGain = context.createGain();
+    voiceGain.gain.value = Math.max(0, Math.min(2, Number(state.aiDj.voiceVolume) || 0));
+    voiceSource.connect(voiceGain);
+    voiceGain.connect(context.destination);
+    voiceGain.connect(state.broadcastDestination);
+    state.novaVoiceGain = voiceGain;
     await new Promise((resolve) => {
-      let settled = false;
-      const finish = () => { if (settled) return; settled = true; resolve(); };
-      audioSource.onended = finish;
-      window.setTimeout(finish, Math.max(1000, (duration + 1) * 1000));
+      let done = false;
+      const finish = () => { if (done) return; done = true; resolve(); };
+      voiceSource.onended = finish;
+      voiceSource.start();
+      window.setTimeout(finish, Math.max(1000, (audio.duration + 1) * 1000));
     });
   } catch (error) {
-    console.warn('AI DJ break failed; continuing music', error);
+    console.warn('Nova DJ break failed; continuing music', error);
   } finally {
+    if (state.novaVoiceGain === voiceGain) state.novaVoiceGain = null;
+    try { voiceSource?.disconnect(); } catch {}
+    try { voiceGain?.disconnect(); } catch {}
     state.aiDj.duckingActive = false;
     decks.forEach((deck) => applyDeckVolume(deck));
   }
@@ -1740,22 +1780,36 @@ function animateCrossfade(oldDeck, newDeck, seconds) {
   requestAnimationFrame(frame);
 }
 
+function reportPlaybackError(item, error) {
+  const message = `Could not play ${item?.title || 'this source'}`;
+  console.warn(message, error);
+  window.dispatchEvent(new CustomEvent('spider:playback-error', {
+    detail: {
+      message, source: item?.url || '', error: String(error?.message || error || ''),
+      canPrepare: Boolean(item && isVideoItem(item) && /^file:/i.test(item.url || '') && !item.compatibilityPrepared)
+    }
+  }));
+  if (!IS_REACT_UI) toast(message);
+}
+
 async function playAt(index, blend = false) {
   const item = state.queue[index];
   if (!playable(item)) return;
 
-  const audioContext = ensureAudioEngine();
-  if (!audioContext || !state.audioGraphs.length) {
-    toast('Audio engine could not start. Check the output device and restart Spider.');
-    return;
+  resolveDecks();
+  if (decks.some((deck) => !deck)) {
+    toast('The player is still loading. Try Play again.');
+    return false;
   }
+  let audioContext;
+  try { audioContext = ensureAudioEngine(); }
+  catch (error) { console.warn('Mixer could not initialize', error); }
   try {
-    if (audioContext.state === 'suspended') await audioContext.resume();
+    if (audioContext?.state === 'suspended') await audioContext.resume();
   } catch (error) {
     console.warn('AudioContext resume failed', error);
   }
 
-  syncMediaStageForItem(item);
   const oldDeck = activeMedia();
   const firstPlay = state.currentIndex < 0 || !oldDeck.src;
   const newDeckIndex = firstPlay ? state.activeDeck : 1 - state.activeDeck;
@@ -1766,22 +1820,11 @@ async function playAt(index, blend = false) {
   try {
     await newDeck.play();
   } catch (error) {
-    const message = `Could not play ${item.title || 'this source'}`;
-    console.warn(message, error);
-    if (IS_REACT_UI) {
-      window.dispatchEvent(new CustomEvent('spider:playback-error', {
-        detail: {
-          message,
-          source: item.url || '',
-          error: String(error?.message || error || '')
-        }
-      }));
-    } else {
-      toast(message);
-    }
-    return;
+    reportPlaybackError(item, error);
+    return false;
   }
 
+  syncMediaStageForItem(item);
   state.currentIndex = index;
   state.activeDeck = newDeckIndex;
   state.crossfadeTriggered = false;
@@ -1804,13 +1847,14 @@ async function playAt(index, blend = false) {
     state.transitioning = false;
     primeNextDeck();
   }
+  return true;
 }
 
-function togglePlay() {
+async function togglePlay() {
   if (state.currentIndex < 0) {
     const first = indicesOfPlayable()[0];
-    if (first >= 0) void playAt(first, false);
-    else void addMedia();
+    if (first >= 0) return await playAt(first, false);
+    else return await addMedia();
     return;
   }
   const deck = activeMedia();
@@ -1828,10 +1872,10 @@ function togglePlay() {
         await deck.play();
       } catch (error) {
         console.warn('Playback could not resume', error);
-        toast('Playback could not resume');
+        reportPlaybackError(currentItem(), error);
       }
     };
-    void resume();
+    await resume();
     return;
   }
 
@@ -2093,7 +2137,19 @@ window.__spiderPlayerEngine = {
     updateNowPlaying()
     return window.__spiderPlayerEngine.getLibrarySnapshot()
   },
-  playQueueIndex: (index) => { const pos = Number(index); if (Number.isInteger(pos) && pos >= 0 && pos < state.queue.length && playable(state.queue[pos])) void playAt(pos, false); return window.__spiderPlayerEngine.getQueueSnapshot(); },
+  prepareMovie: async (url) => {
+    const index = state.queue.findIndex(item => item.url === url);
+    if (index < 0) throw new Error('This movie is no longer in the queue.');
+    const item = state.queue[index];
+    const result = await window.spider.prepareMovie(url);
+    if (!state.queue.includes(item)) throw new Error('Movie preparation finished, but the movie was removed from the queue.');
+    item.originalUrl ||= item.url;
+    item.url = result.url;
+    item.compatibilityPrepared = true;
+    saveState();
+    return await playAt(state.queue.indexOf(item), false);
+  },
+  playQueueIndex: async (index) => { const pos = Number(index); if (Number.isInteger(pos) && pos >= 0 && pos < state.queue.length && playable(state.queue[pos])) await playAt(pos, false); return window.__spiderPlayerEngine.getQueueSnapshot(); },
   // Enqueue API for programmatic queue control
   enqueue(item, playNow = false) {
     if (!item) return window.__spiderPlayerEngine.getQueueSnapshot();
@@ -2150,7 +2206,7 @@ window.__spiderPlayerEngine = {
     emitPlayerEvent('queueChanged', window.__spiderPlayerEngine.getQueueSnapshot());
     return window.__spiderPlayerEngine.getQueueSnapshot();
   },
-  togglePlay: () => { togglePlay(); return getReactPlayerSnapshot(); },
+  togglePlay: async () => { await togglePlay(); return getReactPlayerSnapshot(); },
   previous: () => { advance(-1, false); return getReactPlayerSnapshot(); },
   next: () => { advance(1, false); return getReactPlayerSnapshot(); },
   back: (seconds = 10) => { const deck = activeMedia(); if (!deck) return getReactPlayerSnapshot(); deck.currentTime = Math.max(0, (Number(deck.currentTime) || 0) - (Number(seconds) || 10)); return getReactPlayerSnapshot(); },
@@ -2159,7 +2215,7 @@ window.__spiderPlayerEngine = {
   cycleRepeat: () => { state.repeat = state.repeat === 'off' ? 'one' : state.repeat === 'one' ? 'all' : 'off'; if (!IS_REACT_UI) { $('#repeatButton')?.classList.toggle('active', state.repeat !== 'off'); const label = $('#repeatButton small'); if (label) label.textContent = state.repeat === 'one' ? 'ONE' : state.repeat === 'all' ? 'ALL' : 'OFF'; toast(state.repeat === 'one' ? 'Repeat one' : state.repeat === 'all' ? 'Repeat all' : 'Repeat off'); } saveState(); return getReactPlayerSnapshot(); },
   seek: (value) => { const deck = activeMedia(); const amount = Math.max(0, Math.min(1000, Number(value) || 0)); if (deck && Number.isFinite(deck.duration)) deck.currentTime = (amount / 1000) * deck.duration; return getReactPlayerSnapshot(); },
   setVolume: (value) => { const amount = Math.max(0, Math.min(100, Number(value) || 0)); state.masterVolume = amount / 100; decks.forEach((deck) => applyDeckVolume(deck)); saveState(); return getReactPlayerSnapshot(); },
-  toggleMute: () => { state.muted = !state.muted; decks.forEach((deck) => applyDeckVolume(deck)); return getReactPlayerSnapshot(); },
+  toggleMute: () => { state.muted = !state.muted; decks.forEach((deck) => applyDeckVolume(deck)); if (state.novaVoiceGain && state.audioContext) state.novaVoiceGain.gain.setTargetAtTime(state.muted || state.panicMuted ? 0 : state.aiDj.voiceVolume, state.audioContext.currentTime, 0.01); return getReactPlayerSnapshot(); },
   setCrossfade: (value) => { const seconds = Math.max(0, Math.min(12, Number(value) || 0)); state.crossfade = seconds; if (!IS_REACT_UI) { const control = $('#crossfade'); if (control) control.value = String(seconds); const label = $('#crossfadeValue'); if (label) label.textContent = `${seconds}s`; const gapless = $('#gaplessChip'); if (gapless) gapless.textContent = seconds ? 'CROSSFADE ON' : 'GAPLESS ON'; } saveState(); return getReactPlayerSnapshot(); },
   cycleVisualizer: () => {
     const modes = [
@@ -2492,6 +2548,7 @@ window.__spiderPlayerEngine = {
     for (const graph of state.audioGraphs) graph.programGain.gain.setTargetAtTime(0, state.audioContext.currentTime, 0.005);
     for (const input of state.inputStreams.values()) input.gainNode.gain.setTargetAtTime(0, state.audioContext.currentTime, 0.005);
     for (const cart of state.cartSources) cart.gain.gain.setTargetAtTime(0, state.audioContext.currentTime, 0.005);
+    if (state.novaVoiceGain) state.novaVoiceGain.gain.setTargetAtTime(0, state.audioContext.currentTime, 0.005);
     return true;
   },
   clearPanicMute: () => {
@@ -2589,7 +2646,9 @@ window.__spiderPlayerEngine = {
       description: String(profile.description || '').trim(),
       mimeType: profile.mimeType || preferredBroadcastMimeType(),
     });
-    Object.assign(state.radio, liveState || {}, { active: true, name });
+    if (liveState?.active !== true) throw new Error('The radio server did not confirm a live broadcast');
+    Object.assign(state.radio, liveState, { name });
+    renderRadio();
     return { ...state.radio, ...(liveState || {}) };
   },
   stopRadio: async () => {
@@ -2618,11 +2677,7 @@ function renderRadioProfiles() {
 }
 
 function renderRadio() {
-  const live = Boolean(
-    state.radio.active ||
-    state.radio.publicUrl ||
-    state.radio.qrDataUrl
-  );
+  const live = state.radio.active === true;
 
   const radioIndicator = $('#radioIndicator');
 
@@ -2723,7 +2778,8 @@ async function startBroadcast() {
       mimeType: preferredBroadcastMimeType()
     };
     const liveState = await window.spider.startRadio(profile);
-    Object.assign(state.radio, liveState, { active: true });
+    if (liveState?.active !== true) throw new Error('The radio server did not confirm a live broadcast');
+    Object.assign(state.radio, liveState);
     const existing = state.radio.profiles.findIndex((item) => item.name.toLocaleLowerCase() === name.toLocaleLowerCase());
     if (existing >= 0) state.radio.profiles[existing] = profile;
     else state.radio.profiles.unshift(profile);
@@ -3841,7 +3897,10 @@ window.spider.onRadioEvent((event) => {
       active: false,
       publicUrl: '',
       qrDataUrl: '',
-      listenerCount: 0
+      listenerCount: 0,
+      connectionStatus: 'offline',
+      startedAt: null,
+      uptime: ''
     });
   }
 

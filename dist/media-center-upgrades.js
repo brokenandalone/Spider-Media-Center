@@ -1,13 +1,42 @@
 (() => {
   const IPTV_DEFAULT = 'https://iptv-org.github.io/iptv/index.m3u';
 
+  // Preserve the compiled Kabel AI DJ controller, but route its standard
+  // loopback service call through Electron IPC. This avoids Chromium file://
+  // CORS/PNA issues and makes the voice audio available to the BCN mixer.
   const nativeFetch = window.fetch.bind(window);
   window.fetch = async (...args) => {
+    const target = String(args[0]?.url || args[0] || '');
+    const options = args[1] || {};
+    let url;
+    try { url = new URL(target); } catch { }
+    const nativeNovaEndpoint = url
+      && url.protocol === 'http:'
+      && (url.hostname === '127.0.0.1' || url.hostname === 'localhost')
+      && url.port === '9876'
+      && url.pathname === '/dj/prepare';
+    if (nativeNovaEndpoint && window.spider?.novaPrepare) {
+      if (options.signal?.aborted) throw new DOMException('DJ request aborted', 'AbortError');
+      const request = JSON.parse(String(options.body || '{}'));
+      if (!Number.isFinite(Number(request.secondsRemaining))) {
+        const current = request.currentTrack || {};
+        request.secondsRemaining = Math.max(0, Number(current.duration || 0) - Number(current.currentTime || 0));
+      }
+      const result = await window.spider.novaPrepare(request);
+      if (options.signal?.aborted) throw new DOMException('DJ request aborted', 'AbortError');
+      const now = window.__spiderPlayerBridge?.getAIDJSnapshot?.()?.current;
+      if (request.currentTrack?.id && now?.id && request.currentTrack.id !== now.id) {
+        throw new Error('Song changed before Nova completed the DJ break');
+      }
+      window.__spiderLastDjTalkOver = result.talkOver || null;
+      return new Response(JSON.stringify(result), {
+        status: 200, headers: { 'Content-Type': 'application/json' }
+      });
+    }
     const response = await nativeFetch(...args);
     try {
-      const target = String(args[0]?.url || args[0] || '');
-      if (/\/dj\/prepare(?:$|\?)/.test(target)) {
-        response.clone().json().then((payload) => {
+      if (target.includes('/dj/prepare')) {
+        response.clone().json().then(payload => {
           window.__spiderLastDjTalkOver = payload?.talkOver || null;
         }).catch(() => {});
       }
@@ -32,6 +61,41 @@
     children.flat().filter(Boolean).forEach((child) => node.append(child.nodeType ? child : document.createTextNode(String(child))));
     return node;
   };
+
+  let noticeTimer;
+  window.addEventListener('spider:notice', event => {
+    let box = document.getElementById('spider-playback-notice');
+    if (!box) { box = el('div', {id: 'spider-playback-notice', role: 'status'}); document.body.append(box); }
+    box.textContent = event.detail?.message || '';
+    box.hidden = false;
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => { box.hidden = true; }, 4500);
+  });
+  window.addEventListener('spider:playback-error', event => {
+    const detail = event.detail || {};
+    document.getElementById('spider-playback-error')?.remove();
+    const status = el('p', {text: detail.error || 'This source could not be decoded.'});
+    const box = el('section', {id: 'spider-playback-error', role: 'alert'},
+      el('strong', {text: detail.message || 'Playback failed'}), status);
+    let unsubscribe;
+    const dismiss = el('button', {text: 'Dismiss', onClick: () => { unsubscribe?.(); box.remove(); }});
+    if (detail.canPrepare && window.spider?.prepareMovie) {
+      box.append(el('p', {text: 'Prepare a separate compatible copy using Ubuntu Studio’s FFmpeg, then play it here. The original is kept. Large movies can take several minutes.'}));
+      const cancel = el('button', {text: 'Cancel preparation', onClick: () => window.spider.cancelMoviePreparation()});
+      cancel.hidden = true;
+      const prepare = el('button', {text: 'Prepare and play here', onClick: async () => {
+        prepare.disabled = true; cancel.hidden = false; dismiss.hidden = true;
+        status.textContent = 'Preparing movie for embedded playback…';
+        unsubscribe = window.spider.onMoviePreparation?.(progress => { status.textContent = `Prepared ${Math.floor(progress.seconds || 0)} seconds of video…`; });
+        try {
+          if (await playerBridge().prepareMovie(detail.source)) box.remove();
+        } catch (error) { status.textContent = error?.message || String(error); }
+        finally { unsubscribe?.(); prepare.disabled = false; cancel.hidden = true; dismiss.hidden = false; }
+      }});
+      box.append(prepare, cancel);
+    }
+    box.append(dismiss); document.body.append(box);
+  });
 
   function playerBridge() {
     return window.__spiderPlayerBridge || window.__spiderPlayerEngine || null;
@@ -140,7 +204,7 @@
       const radio = window.__spiderPlayerBridge?.getRadioState?.() || {};
       return {
         ...radio,
-        active: Boolean(radio.active || radio.publicUrl || radio.qrDataUrl)
+        active: radio.active === true
       };
     } catch {
       return { active: false };
@@ -361,6 +425,23 @@
       }
     });
 
+    const novaStatus = el('p', { className: 'bcn-muted', text: 'Nova runs through the native Spider OS DJ service.' });
+    const refreshNova = async () => {
+      novaStatus.textContent = 'Checking Nova on Spider OS…';
+      try {
+        const result = await window.spider.novaHealth();
+        novaStatus.textContent = result?.ok
+          ? 'Nova DJ: connected to Spider OS. Enable DJ breaks in Nova DJ Control.'
+          : 'Nova DJ: the local service is not ready.';
+      } catch {
+        novaStatus.textContent = 'Nova DJ: offline. Music and BCN broadcasting remain available.';
+      }
+    };
+    const checkNova = el('button', {
+      type: 'button', className: 'bcn-small-button',
+      text: 'Check Nova DJ', onclick: refreshNova
+    });
+
     panel.append(
       close,
       el('header', { className: 'bcn-panel-header' },
@@ -391,10 +472,18 @@
         el('h3', { text: 'Web Media' }),
         el('p', { className: 'bcn-muted', text: 'Use Open website for a normal web page. Use Play direct stream only for an actual audio/video stream URL such as MP3, AAC, HLS/M3U8 or a direct media endpoint. A normal website URL is not itself a media stream.' }),
         el('div', { className: 'bcn-row' }, webUrl, openWebsite, playDirect)
+      ),
+      el('div', { className: 'bcn-section' },
+        el('h3', { text: 'Nova · Native AI DJ' }),
+        novaStatus,
+        checkNova
       )
     );
 
-    launcher.addEventListener('click', () => panel.classList.toggle('bcn-hidden'));
+    launcher.addEventListener('click', () => {
+      panel.classList.toggle('bcn-hidden');
+      if (!panel.classList.contains('bcn-hidden')) void refreshNova();
+    });
     document.body.append(launcher, panel);
 
   }

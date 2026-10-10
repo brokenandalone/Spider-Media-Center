@@ -179,6 +179,13 @@ npx --yes asar@3.2.0 pack \
 
 Then install the tested build into the separate Media Center installation. Back up the current ASAR before replacing it.
 
+For the repeatable playback upgrade, use `npm ci`, `npm run check`, `npm test`,
+then `npm run package:linux`. The verified archive, checksum manifest and selective
+installer appear in `release/`; see [build installation](docs/INSTALL-BUILD.md).
+CI also publishes this folder as a workflow artifact. The package retains the
+compiled interface and includes production dependencies, excluding recovered
+backup scripts, the Windows relay binary and build tools.
+
 ## Preservation rules
 
 - Do not modify the known-good Spider Media Player installation.
@@ -200,7 +207,11 @@ BCN broadcasting and international media discovery are part of Spider Media Cent
 - Native Spider OS AI DJ service (normally `http://127.0.0.1:9876`) with **Nova** as Webbie's on-air DJ name
 - Planned live-radio hosting with show-clock scheduling, back-announces, front-sells, liners, requests and reliable mix timing
 
-The proposed USB-portable DJ was never deployed and was removed to avoid maintaining a second runtime. Nova uses the native Spider OS service. Automated broadcast integration still requires end-to-end testing.
+The proposed USB-portable DJ was never deployed and was removed to avoid maintaining a second runtime. Nova uses the native Spider OS service.
+
+The existing compiled **Nova DJ Control** panel remains the user-facing control (enable, DJ break frequency, lead time, voice volume and ducking). Its loopback requests are bridged through secure Electron IPC to the native `127.0.0.1:9876/dj/prepare` service. Only generated files inside the native DJ cache can be loaded; Media Center returns them as bounded in-memory audio. Nova's spoken breaks use the same Web Audio context and `broadcastDestination` as the music decks, reaching both local speakers and BCN's listener stream. Missing services and late/skipped announcements do not stop music.
+
+Automation and streaming still require an end-to-end installed Spider OS broadcast test before unattended operation is considered verified.
 
 Spider Media Center will not launch VLC as an external fallback player; VideoLAN technology is treated as an upstream source/embedded engine option inside Spider's own playback stack.
 
@@ -242,3 +253,38 @@ Keeping them separate allows Media Center to be developed, tested, packaged, and
 ## License
 
 No license has been selected yet. Until a license is added, normal copyright restrictions apply.
+
+
+## Playback reliability and local movie compatibility
+
+The Play and queue-play bridge methods now wait for playback before returning a
+snapshot. Failed decoding appears in the Media Center screen. Media Session Play
+and Pause are idempotent; optional mixer failures no longer block the video deck.
+The embedded visualizer keeps running through unavailable canvas mounts, and stale
+broadcast links no longer make a stopped station appear live.
+
+For a local movie that Chromium cannot decode, choose **Prepare and play here**
+in the playback error card. The installed `ffmpeg` decoder prepares a separate
+VP8/Opus WebM copy, then plays it in the existing embedded deck. This is a
+compatibility conversion, not the planned full libVLC engine. It opens no external
+player and does not modify the source. Preparation has elapsed-video progress,
+cancellation, a two-hour time limit, a 4 GiB cache limit, and low-disk checks.
+Cached copies are reused when the source size and modification time match.
+On Linux they live under `$XDG_CACHE_HOME/Spider Media Center/movie-compatibility`
+(or `~/.cache` when unset); stop playback before manually removing cached copies.
+Other platforms use Electron's temporary directory.
+
+Preparation can take several minutes, limits video width to 1920 pixels, uses the
+first video and audio streams, and does not preserve subtitle tracks. It covers
+local movie files; it does not decode streaming-service pages or add HLS support.
+Full direct libVLC decoding, subtitle controls, and native stream support remain
+future work. The existing browser playback path is retained. Direct playback during a mixer
+failure bypasses EQ and broadcast processing until the mixer recovers.
+
+Run `npm run check` and `npm test`. The decoder integration test generates a small
+MPEG-4/PCM Matroska movie, verifies the resulting VP8/Opus streams with ffprobe,
+checks that the original is unchanged, and checks cache reuse. CI installs FFmpeg
+to run this fixture. Tests also cover cancelled preparation, invalid inputs,
+async Play, optional mixer recovery, detached decks, radio state, and canvas
+rescheduling. A packaged Electron GUI and owner-PC playback check are still
+required; source tests are not evidence that the installed binary was updated.

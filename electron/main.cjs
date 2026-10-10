@@ -21,7 +21,6 @@ const {
   loadIptvPlaylist,
   searchRadioStations
 } = require('./network-directory.cjs');
-const { findPortableDj } = require('./usb-dj.cjs');
 
 const ROOT = path.join(__dirname, '..');
 const USE_REACT_UI = process.env.SPIDER_LEGACY_UI !== '1' && process.env.SPIDER_SMOKE_TEST !== '1';
@@ -1191,7 +1190,6 @@ ipcMain.handle('media:choose-folder', async () => {
 ipcMain.handle('media:from-paths', async (_event, paths) => await safeMediaEntries(Array.isArray(paths) ? paths : []));
 ipcMain.handle('iptv:load', (_event, url) => loadIptvPlaylist(url || IPTV_DEFAULT_PLAYLIST));
 ipcMain.handle('radio:directory-search', (_event, options) => searchRadioStations(options || {}));
-ipcMain.handle('dj:portable-info', () => findPortableDj());
 ipcMain.handle('web:open', (_event, url) => openWebPage(url));
 ipcMain.handle('service:open', (_event, service, query) => {
   openService(service, query);

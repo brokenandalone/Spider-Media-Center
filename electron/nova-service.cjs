@@ -15,7 +15,9 @@ const MAX_AUDIO = 4 * 1024 * 1024;
 function nativeNova(options = {}) {
   const port = options.port || 9876;
   const cacheDir = options.cacheDir || path.join(os.homedir(), '.cache', 'spider-os', 'ai-dj');
-  const timeoutMs = options.timeoutMs || 28000;
+  const timeoutMs = options.timeoutMs || 54000;
+  const stationIdEvery = Math.max(2, Math.min(20, Number(options.stationIdEvery) || 4));
+  let preparedBreaks = 0;
 
   function localRequest(method, endpoint, payload) {
     const body = payload === undefined ? '' : JSON.stringify(payload);
@@ -96,19 +98,41 @@ function nativeNova(options = {}) {
         artist: String(item.artist || '').slice(0, 140),
         album: String(item.album || '').slice(0, 140)
       });
+      const allowedTypes = new Set(['transition', 'station_id', 'liner', 'show_intro', 'show_outro', 'request']);
+      const explicit = String(payload.type || 'transition').toLowerCase();
+      const requestedType = allowedTypes.has(explicit) ? explicit : 'transition';
+      // Every fourth successfully prepared automatic break identifies BCN.
+      // Explicit station IDs, show starts and other operator choices take priority.
+      const type = requestedType === 'transition' && (preparedBreaks + 1) % stationIdEvery === 0
+        ? 'station_id' : requestedType;
+      const safeContext = payload.context && typeof payload.context === 'object' && !Array.isArray(payload.context)
+        ? payload.context : {};
+      const safeRequest = payload.request && typeof payload.request === 'object' && !Array.isArray(payload.request)
+        ? payload.request : {};
+      const approved = safeRequest.approved === true;
       const request = {
         event: 'prepareDJBreak',
-        type: 'transition',
+        type,
         currentTrack: text(current),
         nextTrack: text(next),
         secondsRemaining: Math.max(0, Math.min(180, Number(payload.secondsRemaining) || 0)),
-        context: { station: 'Broken City Network', host: 'Nova' }
+        context: {
+          station: 'Broken City Network',
+          host: 'Nova',
+          showName: String(safeContext.showName || '').slice(0, 80),
+          segment: String(safeContext.segment || '').slice(0, 80),
+          tone: String(safeContext.tone || '').slice(0, 48)
+        },
+        request: approved
+          ? { approved: true, approvedRequest: String(safeRequest.approvedRequest || '').slice(0, 180) }
+          : { approved: false }
       };
       const reply = await localRequest('POST', '/dj/prepare', request);
       const audio = readGeneratedAudio(reply.audioFile);
+      preparedBreaks += 1;
       return {
         id: String(reply.id || '').slice(0, 100),
-        type: 'transition',
+        type,
         script: String(reply.script || '').slice(0, 1200),
         audioFile: audio,
         talkOver: reply.talkOver && typeof reply.talkOver === 'object'

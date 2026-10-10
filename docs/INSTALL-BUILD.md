@@ -1,5 +1,22 @@
 # Media Center playback build
 
+## Combined BCN/Nova installation
+
+For the installed Spider OS machine, use the root-level source script
+`scripts/install-nova-bcn.sh` from the Media Center repository rather than
+installing two independent DJs. The script installs the verified Media Center
+archive and upgrades the **existing** Spider OS `spider-ai-dj.service` with
+the native Nova persona. It validates the source, backs up the existing archive
+and Python service, and runs a native DJ health check. It does not touch Webbie
+or the separate, known-good Spider Media Player.
+
+The native Nova service recognizes station IDs, liners and show introductions.
+Media Center automatically requests a BCN station ID every fourth successfully
+prepared DJ transition. Show context and any explicitly approved requests are
+sent through the existing secure Electron bridge. This does not yet establish
+a completed live listener-request UI or a 24/7 broadcast scheduler.
+
+
 This is an application archive upgrade for the existing **Spider Media Center**
 installation at `/opt/spider-media-center`. It preserves the compiled Kabel 7.5
 interface, the existing Electron runtime, application settings, libraries and

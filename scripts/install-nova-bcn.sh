@@ -122,17 +122,32 @@ else
 fi
 
 if python3 - <<'PY'
-import json, urllib.request
-with urllib.request.urlopen('http://127.0.0.1:9876/health', timeout=5) as response:
-    status = json.load(response)
-assert status.get('ok') is True and status.get('host') == 'Nova', status
-print('Native Nova DJ: healthy, on-air name Nova; single Spider OS service.')
+import json, time, urllib.request
+for attempt in range(5):
+    try:
+        with urllib.request.urlopen('http://127.0.0.1:9876/health', timeout=3) as response:
+            status = json.load(response)
+        if status.get('ok') is True and status.get('host') == 'Nova':
+            print('Native Nova DJ: healthy, on-air name Nova; single Spider OS service.')
+            break
+    except Exception:
+        pass
+    time.sleep(1)
+else:
+    raise SystemExit('Nova health check did not confirm the on-air identity.')
 PY
 then
   echo 'Nova and BCN code installation completed.'
 else
-  echo 'Nova health check failed after service restart. Inspect: journalctl --user -u spider-ai-dj.service -n 50'
-  echo "You can restore the previous Nova service: sudo cp -a -- '$NOVA_BACKUP' '$NOVA_TARGET/service.py'"
+  echo 'Nova health check failed. Restoring the previous native DJ service.'
+  sudo cp -a -- "$NOVA_BACKUP" "$NOVA_TARGET/service.py"
+  if [[ -f "$NOVA_BACKUP.persona" ]]; then
+    sudo cp -a -- "$NOVA_BACKUP.persona" "$NOVA_TARGET/nova_host.py"
+  else
+    sudo rm -f -- "$NOVA_TARGET/nova_host.py"
+  fi
+  systemctl --user restart spider-ai-dj.service 2>/dev/null || true
+  fail "Nova health check failed, native service restored; the Media Center rollback command was printed above."
 fi
 
 

@@ -3,8 +3,8 @@
 set -Eeuo pipefail
 
 REPO='brokenandalone/Spider-Media-Center'
-SOURCE_COMMIT='4ddb0e070eb31ebf1e002f7b539988b49f0fb639'
-CI_RUN_ID='38069859414'
+SOURCE_COMMIT='c024e41da3b81a85e18c93ceaa79d0053a8c9109'
+CI_RUN_ID='38079861652'
 ARTIFACT='Spider-Media-Center-Playback-Build'
 NOVA_OS_REPO='brokenandalone/spider-narive-os'
 NOVA_OS_COMMIT='980fccf98e4dfdfdb27b32a49c46158ca752a79c'

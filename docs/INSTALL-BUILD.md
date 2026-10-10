@@ -1,5 +1,17 @@
 # Media Center playback build
 
+## Verify supervised BCN relay restoration
+
+After confirming the station is live and playing rights-cleared material,
+simulate a controlled relay failure on a test broadcast. When the existing
+public Cloudflare relay process exits unexpectedly, the station goes off air,
+and BCN Media > Signal Monitor displays **Operator Relay Recovery**. Check
+the permission confirmation box and select **Restore BCN relay**. A new
+temporary public URL is issued; distribute the new link or QR code and verify
+phone audio. Normal **Stop broadcast** must not offer recovery. There is no
+automatic restart, no reuse of an expired listener link, and no second DJ
+daemon.
+
 ## Verify actual BCN stream delivery
 
 After starting a **permitted** BCN broadcast, open **BCN Media > BCN Signal

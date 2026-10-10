@@ -7,7 +7,7 @@ const vm=require('node:vm');
 
 const source=fs.readFileSync(path.join(__dirname,'..','dist','media-center-upgrades.js'),'utf8');
 const start=source.indexOf('    function disarmContinuity(reason) {');
-const end=source.indexOf('\n\n    const novaStatus',start);
+const end=source.indexOf('\n\n    const signalStatus',start);
 assert.ok(start>0 && end>start,'BCN session-only guard must be present');
 const guard=source.slice(start,end);
 

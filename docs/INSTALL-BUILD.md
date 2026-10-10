@@ -1,5 +1,16 @@
 # Media Center playback build
 
+## Verify actual BCN stream delivery
+
+After starting a **permitted** BCN broadcast, open **BCN Media > BCN Signal
+Monitor**. With zero listeners, expect "No listeners": the server cannot claim
+to have delivered audible sound. Connect a phone using the broadcast link,
+tap Listen, and watch the status move from awaiting the first audio chunk to
+sending. If socket delivery stalls, the panel will warn, and any armed
+Continuity Guard will disarm rather than attempting to restart public
+broadcasting. The operator still needs to listen to the audio on the phone:
+server bytes alone are not proof of audibility.
+
 ## Combined BCN/Nova installation
 
 For the installed Spider OS machine, use the root-level source script

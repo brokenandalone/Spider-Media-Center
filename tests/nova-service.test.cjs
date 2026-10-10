@@ -93,7 +93,40 @@ test('Nova shares the BCN audio graph, respects mute and avoids duplicate legacy
   assert.match(renderer, /voiceGain\.connect\(context\.destination\)/);
   assert.match(renderer, /state\.novaVoiceGain\.gain\.setTargetAtTime\(0/);
   assert.match(upgrades, /window\.spider\.novaPrepare\(request\)/);
-  assert.match(compiled, /requestTimeoutMs:3e4/);
+  assert.match(compiled, /requestTimeoutMs:58e3/);
+  assert.match(compiled, /prepareSeconds:90/);
   assert.match(compiled, /secondsRemaining:Math\.max\(0,Number\(e\.duration/);
   assert.doesNotMatch(upgrades, /Scan USB DJ|portableDjInfo/);
+});
+
+
+test('native Nova rotates a BCN station ID into every fourth prepared transition', async () => {
+  await fixture(async ({ dj, getIncoming }) => {
+    const standard = {
+      currentTrack: { title: 'The River Remembers', artist: 'Broken Sorrow' },
+      nextTrack: { title: 'Neon Graves', artist: 'Broken Sorrow' },
+      context: { showName: 'BCN Nightwatch' }
+    };
+    for (let count = 1; count <= 5; count++) {
+      const result = await dj.prepare(standard);
+      const expected = count === 4 ? 'station_id' : 'transition';
+      assert.equal(getIncoming().type, expected, 'break ' + count);
+      assert.equal(result.type, expected);
+      assert.equal(getIncoming().context.showName, 'BCN Nightwatch');
+    }
+  });
+});
+
+test('native Nova only receives explicitly approved listener requests', async () => {
+  await fixture(async ({ dj, getIncoming }) => {
+    await dj.prepare({ type: 'request', currentTrack: {}, nextTrack: {},
+      request: { approvedRequest: 'Neon Graves for Sam', approved: false } });
+    assert.equal(getIncoming().request.approved, false);
+    assert.equal(getIncoming().request.approvedRequest, undefined);
+    await dj.prepare({ type: 'request', currentTrack: {}, nextTrack: {},
+      request: { approvedRequest: 'Neon Graves for Sam', approved: true } });
+    assert.equal(getIncoming().type, 'request');
+    assert.equal(getIncoming().request.approved, true);
+    assert.equal(getIncoming().request.approvedRequest, 'Neon Graves for Sam');
+  });
 });

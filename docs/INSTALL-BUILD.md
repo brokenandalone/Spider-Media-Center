@@ -11,6 +11,13 @@ and Python service, and runs a native DJ health check. It does not touch Webbie
 or the separate, known-good Spider Media Player.
 
 The native Nova service recognizes station IDs, liners and show introductions.
+The BCN Show Clock and Request Desk live in the Media Center upgrade itself. The
+scheduler only chooses *spoken context* during eligible DJ transitions; it
+does not start/stop broadcasts or automate DJ-on-air status. Weekly show
+blocks use the computer's local time. Pending requests require approval, and
+the prepared status must not be mistaken for confirmed airtime. Settings and
+request review state are saved under the existing Electron user-data folder.
+
 Media Center automatically requests a BCN station ID every fourth successfully
 prepared DJ transition. Show context and any explicitly approved requests are
 sent through the existing secure Electron bridge. This does not yet establish

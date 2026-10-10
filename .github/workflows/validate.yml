@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - feature/bcn-network-ai-dj
+      - 'upgrades/**'
   pull_request:
 
 jobs:
@@ -22,6 +23,7 @@ jobs:
           node --check electron/renderer.js
           node --check electron/network-directory.cjs
           node --check electron/nova-service.cjs
+          node --check electron/bcn-desk.cjs
           node --check dist/assets/index-Dt0TTW2G.js
           node --check dist/media-center-upgrades.js
       - name: Validate one-command Spider OS installer

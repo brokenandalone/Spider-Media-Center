@@ -447,6 +447,111 @@
       text: 'Check Nova DJ', onclick: refreshNova
     });
 
+    // All scheduling and approvals live in the main process, not localStorage.
+    // Scheduling changes Nova's spoken context but NEVER launches broadcasting.
+    const showStatus = el('p', { className: 'bcn-muted', text: 'Show schedule uses Spider OS local time.' });
+    const showList = el('div', { className: 'bcn-results' });
+    const requestStatus = el('p', { className: 'bcn-muted', text: 'Only approved entries can be spoken by Nova.' });
+    const requestList = el('div', { className: 'bcn-results' });
+
+    const showDay = el('select');
+    ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+      .forEach((name, index) => showDay.append(el('option', { value: String(index), text: name })));
+    showDay.value = String(new Date().getDay());
+    const showStart = el('input', { type: 'time', value: '18:00', 'aria-label': 'Show starts' });
+    const showEnd = el('input', { type: 'time', value: '19:00', 'aria-label': 'Show ends' });
+    const showName = el('input', { type: 'text', maxlength: '80', placeholder: 'Show name', 'aria-label': 'Show name' });
+    const showTone = el('select', { 'aria-label': 'Nova show tone' });
+    ['natural', 'late night', 'haunting', 'energetic', 'relaxed'].forEach(tone =>
+      showTone.append(el('option', { value: tone, text: tone })));
+    const requestText = el('input', {
+      type: 'text', maxlength: '180',
+      placeholder: 'Enter a request or dedication for review',
+      'aria-label': 'Request for operator approval'
+    });
+
+    const renderProgramming = snapshot => {
+      const current = snapshot.currentShow;
+      const next = snapshot.upcomingShow;
+      showStatus.textContent = current
+        ? 'Scheduled now: ' + current.name + '. Time zone: ' + snapshot.timeZone
+        : 'No scheduled show is active. Next: ' +
+          (next ? next.name + ' (' + snapshot.days[next.day] + ' ' + next.start + ')' : 'nothing scheduled') +
+          '. Time zone: ' + snapshot.timeZone;
+      showList.replaceChildren();
+      if (!snapshot.shows.length) showList.append(el('p', { className: 'bcn-muted', text: 'No shows scheduled yet.' }));
+      snapshot.shows.forEach(show => {
+        const remove = el('button', {
+          type: 'button', className: 'bcn-small-button', text: 'Remove',
+          onclick: async () => {
+            remove.disabled = true;
+            try { renderProgramming(await window.spider.bcnRemoveShow(show.id)); }
+            catch (error) { showStatus.textContent = error?.message || String(error); }
+            finally { remove.disabled = false; }
+          }
+        });
+        showList.append(el('div', { className: 'bcn-result-card' },
+          el('span', { text: snapshot.days[show.day] + ' · ' + show.start + ' to ' + show.end + ' · ' + show.name + ' (' + show.tone + ')' }),
+          remove));
+      });
+
+      requestList.replaceChildren();
+      if (!snapshot.requests.length) requestList.append(el('p', {
+        className: 'bcn-muted', text: 'No requests in the operator queue.'
+      }));
+      snapshot.requests.slice().reverse().forEach(request => {
+        const actions = el('div', { className: 'bcn-result-actions' });
+        if (request.status === 'pending' || request.status === 'approved') {
+          for (const approved of request.status === 'pending' ? [true, false] : [false]) {
+            const control = el('button', {
+              type: 'button', className: 'bcn-small-button',
+              text: approved ? 'Approve' : request.status === 'approved' ? 'Withdraw' : 'Reject',
+              onclick: async () => {
+                control.disabled = true;
+                try { renderProgramming(await window.spider.bcnReviewRequest(request.id, approved)); }
+                catch (error) { requestStatus.textContent = error?.message || String(error); }
+                finally { control.disabled = false; }
+              }
+            });
+            actions.append(control);
+          }
+        }
+        requestList.append(el('div', { className: 'bcn-result-card' },
+          el('span', { text: request.text + ' · ' + request.status }),
+          actions));
+      });
+      requestStatus.textContent = 'Pending requires approval. Prepared means Nova generated a break, not confirmed airtime.';
+    };
+    const refreshProgramming = async () => {
+      try { renderProgramming(await window.spider.bcnDeskState()); }
+      catch (error) { showStatus.textContent = 'BCN desk unavailable: ' + (error?.message || String(error)); }
+    };
+    const addShowButton = el('button', {
+      type: 'button', className: 'bcn-small-button', text: 'Schedule show',
+      onclick: async () => {
+        addShowButton.disabled = true;
+        try {
+          renderProgramming(await window.spider.bcnAddShow({
+            day: Number(showDay.value), start: showStart.value, end: showEnd.value,
+            name: showName.value, tone: showTone.value
+          }));
+          showName.value = '';
+        } catch (error) { showStatus.textContent = error?.message || String(error); }
+        finally { addShowButton.disabled = false; }
+      }
+    });
+    const addRequestButton = el('button', {
+      type: 'button', className: 'bcn-small-button', text: 'Add for review',
+      onclick: async () => {
+        addRequestButton.disabled = true;
+        try {
+          renderProgramming(await window.spider.bcnAddRequest(requestText.value));
+          requestText.value = '';
+        } catch (error) { requestStatus.textContent = error?.message || String(error); }
+        finally { addRequestButton.disabled = false; }
+      }
+    });
+
     panel.append(
       close,
       el('header', { className: 'bcn-panel-header' },
@@ -482,12 +587,26 @@
         el('h3', { text: 'Nova · Native AI DJ' }),
         novaStatus,
         checkNova
+      ),
+      el('div', { className: 'bcn-section' },
+        el('h3', { text: 'BCN Show Clock' }),
+        el('p', { className: 'bcn-muted', text: 'Set Nova’s on-air show identity by Spider OS local time. Scheduling announcements does not start or stop a public broadcast. Split overnight blocks at midnight.' }),
+        showStatus,
+        el('div', { className: 'bcn-row' }, showDay, showStart, showEnd, showName, showTone, addShowButton),
+        showList
+      ),
+      el('div', { className: 'bcn-section' },
+        el('h3', { text: 'BCN Request Desk' }),
+        el('p', { className: 'bcn-muted', text: 'Operator-entered requests only. Future listener-submission integration will require explicit moderation; nothing is announced until you approve it.' }),
+        requestStatus,
+        el('div', { className: 'bcn-row' }, requestText, addRequestButton),
+        requestList
       )
     );
 
     launcher.addEventListener('click', () => {
       panel.classList.toggle('bcn-hidden');
-      if (!panel.classList.contains('bcn-hidden')) void refreshNova();
+      if (!panel.classList.contains('bcn-hidden')) { void refreshNova(); void refreshProgramming(); }
     });
     document.body.append(launcher, panel);
 

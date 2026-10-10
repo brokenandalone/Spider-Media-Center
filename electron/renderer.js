@@ -1695,32 +1695,52 @@ function normalizeDJAudioUrl(value) {
 }
 
 async function playDJBreak(breakItem) {
-  const source = window.__spiderAudioEngine?.playBuffer;
-  if (typeof source !== 'function') return;
   const url = normalizeDJAudioUrl(breakItem.audioFile);
-  if (!url) return;
-
-  const duckLevel = Math.max(
-    0.05,
-    Math.min(1, Number(breakItem?.talkOver?.duckLevel) || state.aiDj.musicDuckLevel || 0.3)
-  );
-
+  if (!url || state.panicMuted || state.muted) return;
+  const context = ensureAudioEngine();
+  if (!context || !state.broadcastDestination) {
+    console.warn('Nova DJ cannot reach the broadcast audio graph');
+    return;
+  }
+  const duckLevel = Math.max(0.05, Math.min(1,
+    Number(breakItem?.talkOver?.duckLevel) || state.aiDj.musicDuckLevel || 0.3));
   state.aiDj.duckingActive = true;
   state.aiDj.activeDuckLevel = duckLevel;
   decks.forEach((deck) => applyDeckVolume(deck));
 
+  let voiceSource;
+  let voiceGain;
   try {
-    const audioSource = await source.call(window.__spiderAudioEngine, url, 0, { volume: state.aiDj.voiceVolume });
-    const duration = Number(audioSource?.buffer?.duration) || 12;
+    // Decode into the SAME context as the music/broadcast stream. The old
+    // separate SpiderAudioEngine context only reached local speakers.
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Nova audio could not be loaded');
+    const encoded = await response.arrayBuffer();
+    if (!encoded.byteLength || encoded.byteLength > 4 * 1024 * 1024) {
+      throw new Error('Nova audio is missing or unexpectedly large');
+    }
+    const audio = await context.decodeAudioData(encoded);
+    voiceSource = context.createBufferSource();
+    voiceSource.buffer = audio;
+    voiceGain = context.createGain();
+    voiceGain.gain.value = Math.max(0, Math.min(2, Number(state.aiDj.voiceVolume) || 0));
+    voiceSource.connect(voiceGain);
+    voiceGain.connect(context.destination);
+    voiceGain.connect(state.broadcastDestination);
+    state.novaVoiceGain = voiceGain;
     await new Promise((resolve) => {
-      let settled = false;
-      const finish = () => { if (settled) return; settled = true; resolve(); };
-      audioSource.onended = finish;
-      window.setTimeout(finish, Math.max(1000, (duration + 1) * 1000));
+      let done = false;
+      const finish = () => { if (done) return; done = true; resolve(); };
+      voiceSource.onended = finish;
+      voiceSource.start();
+      window.setTimeout(finish, Math.max(1000, (audio.duration + 1) * 1000));
     });
   } catch (error) {
-    console.warn('AI DJ break failed; continuing music', error);
+    console.warn('Nova DJ break failed; continuing music', error);
   } finally {
+    if (state.novaVoiceGain === voiceGain) state.novaVoiceGain = null;
+    try { voiceSource?.disconnect(); } catch {}
+    try { voiceGain?.disconnect(); } catch {}
     state.aiDj.duckingActive = false;
     decks.forEach((deck) => applyDeckVolume(deck));
   }
@@ -2195,7 +2215,7 @@ window.__spiderPlayerEngine = {
   cycleRepeat: () => { state.repeat = state.repeat === 'off' ? 'one' : state.repeat === 'one' ? 'all' : 'off'; if (!IS_REACT_UI) { $('#repeatButton')?.classList.toggle('active', state.repeat !== 'off'); const label = $('#repeatButton small'); if (label) label.textContent = state.repeat === 'one' ? 'ONE' : state.repeat === 'all' ? 'ALL' : 'OFF'; toast(state.repeat === 'one' ? 'Repeat one' : state.repeat === 'all' ? 'Repeat all' : 'Repeat off'); } saveState(); return getReactPlayerSnapshot(); },
   seek: (value) => { const deck = activeMedia(); const amount = Math.max(0, Math.min(1000, Number(value) || 0)); if (deck && Number.isFinite(deck.duration)) deck.currentTime = (amount / 1000) * deck.duration; return getReactPlayerSnapshot(); },
   setVolume: (value) => { const amount = Math.max(0, Math.min(100, Number(value) || 0)); state.masterVolume = amount / 100; decks.forEach((deck) => applyDeckVolume(deck)); saveState(); return getReactPlayerSnapshot(); },
-  toggleMute: () => { state.muted = !state.muted; decks.forEach((deck) => applyDeckVolume(deck)); return getReactPlayerSnapshot(); },
+  toggleMute: () => { state.muted = !state.muted; decks.forEach((deck) => applyDeckVolume(deck)); if (state.novaVoiceGain && state.audioContext) state.novaVoiceGain.gain.setTargetAtTime(state.muted || state.panicMuted ? 0 : state.aiDj.voiceVolume, state.audioContext.currentTime, 0.01); return getReactPlayerSnapshot(); },
   setCrossfade: (value) => { const seconds = Math.max(0, Math.min(12, Number(value) || 0)); state.crossfade = seconds; if (!IS_REACT_UI) { const control = $('#crossfade'); if (control) control.value = String(seconds); const label = $('#crossfadeValue'); if (label) label.textContent = `${seconds}s`; const gapless = $('#gaplessChip'); if (gapless) gapless.textContent = seconds ? 'CROSSFADE ON' : 'GAPLESS ON'; } saveState(); return getReactPlayerSnapshot(); },
   cycleVisualizer: () => {
     const modes = [
@@ -2528,6 +2548,7 @@ window.__spiderPlayerEngine = {
     for (const graph of state.audioGraphs) graph.programGain.gain.setTargetAtTime(0, state.audioContext.currentTime, 0.005);
     for (const input of state.inputStreams.values()) input.gainNode.gain.setTargetAtTime(0, state.audioContext.currentTime, 0.005);
     for (const cart of state.cartSources) cart.gain.gain.setTargetAtTime(0, state.audioContext.currentTime, 0.005);
+    if (state.novaVoiceGain) state.novaVoiceGain.gain.setTargetAtTime(0, state.audioContext.currentTime, 0.005);
     return true;
   },
   clearPanicMute: () => {

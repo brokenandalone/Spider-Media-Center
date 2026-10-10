@@ -501,11 +501,11 @@
       }));
       snapshot.requests.slice().reverse().forEach(request => {
         const actions = el('div', { className: 'bcn-result-actions' });
-        if (request.status === 'pending') {
-          for (const approved of [true, false]) {
+        if (request.status === 'pending' || request.status === 'approved') {
+          for (const approved of request.status === 'pending' ? [true, false] : [false]) {
             const control = el('button', {
               type: 'button', className: 'bcn-small-button',
-              text: approved ? 'Approve' : 'Reject',
+              text: approved ? 'Approve' : request.status === 'approved' ? 'Withdraw' : 'Reject',
               onclick: async () => {
                 control.disabled = true;
                 try { renderProgramming(await window.spider.bcnReviewRequest(request.id, approved)); }

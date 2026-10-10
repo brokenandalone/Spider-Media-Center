@@ -361,23 +361,6 @@
       }
     });
 
-    const djStatus = el('p', { className: 'bcn-muted', text: 'Portable AI DJ: not scanned' });
-    const scanDj = el('button', {
-      type: 'button',
-      className: 'bcn-small-button',
-      text: 'Scan USB DJ',
-      onclick: async () => {
-        try {
-          const info = await window.spider.portableDjInfo();
-          djStatus.textContent = info?.available
-            ? `Portable AI DJ found: ${info.directory}`
-            : 'Portable AI DJ drive not found.';
-        } catch (error) {
-          djStatus.textContent = error.message;
-        }
-      }
-    });
-
     panel.append(
       close,
       el('header', { className: 'bcn-panel-header' },
@@ -408,12 +391,6 @@
         el('h3', { text: 'Web Media' }),
         el('p', { className: 'bcn-muted', text: 'Use Open website for a normal web page. Use Play direct stream only for an actual audio/video stream URL such as MP3, AAC, HLS/M3U8 or a direct media endpoint. A normal website URL is not itself a media stream.' }),
         el('div', { className: 'bcn-row' }, webUrl, openWebsite, playDirect)
-      ),
-      el('div', { className: 'bcn-section' },
-        el('h3', { text: 'Portable AI DJ' }),
-        djStatus,
-        scanDj,
-        el('p', { className: 'bcn-muted', text: 'A valid drive contains SPIDER_DJ/spider-dj.json. The portable service can later use a bundled GGUF or Spider OS Ollama.' })
       )
     );
 

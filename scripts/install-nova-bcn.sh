@@ -43,7 +43,7 @@ if [[ ! -s "$WORK/release/app.asar" ]]; then
     npm ci --ignore-scripts --no-audit --no-fund
     npm run check
     npm test
-    npm run package:linux -- "$WORK/release"
+    SPIDER_BUILD_REVISION="$SOURCE_COMMIT" npm run package:linux -- "$WORK/release"
   )
 fi
 

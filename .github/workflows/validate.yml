@@ -24,6 +24,10 @@ jobs:
           node --check electron/nova-service.cjs
           node --check dist/assets/index-Dt0TTW2G.js
           node --check dist/media-center-upgrades.js
+      - name: Validate one-command Spider OS installer
+        run: |
+          bash -n scripts/install-nova-bcn.sh
+          bash -n scripts/install-media-center.sh
       - name: Install fixture decoder
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Playback and compatibility regressions

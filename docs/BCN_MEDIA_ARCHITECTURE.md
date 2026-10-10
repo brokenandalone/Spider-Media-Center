@@ -111,6 +111,8 @@ The Media Center discovers a drive only when it contains the manifest file. It m
 
 ## Real DJ behavior
 
+The on-air AI host is **Nova**, the broadcasting persona of Spider OS assistant **Webbie**. Webbie retains her usual name and identity in other workspaces; all BCN DJ introductions and on-air self-references use Nova.
+
 The AI DJ should operate from a show clock and a state machine.
 
 It should be able to:

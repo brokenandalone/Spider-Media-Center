@@ -195,6 +195,26 @@ backup scripts, the Windows relay binary and build tools.
 - Keep a rollback copy before installing a new ASAR.
 - Preserve playback, DJ, radio, visualizers, sharing, and queue behavior while adding new Media Center features.
 
+## BCN controlled relay recovery
+
+If the public Cloudflare Quick Tunnel **exits unexpectedly** after a confirmed
+live session, Media Center now records a bounded, session-only recovery
+candidate. The BCN Media > Signal Monitor > Operator Relay Recovery section
+shows the outage and permits restoration **only after a fresh operator rights
+confirmation**. The app never automatically restarts a public broadcast.
+Manual Stop revokes the recovery option.
+
+Recovery is serialized with Start and Stop to avoid duplicate public tunnel
+instances. Attempts have a 15-second cooldown and a rolling maximum of three
+per hour. Recovery rotates the one-time URL and QR code; previous links must
+be replaced. The queued tracks and DJ programming are not rebuilt, and any
+listener submission window closes during the outage. Diagnostics do not expose
+secret radio tokens or previous public links.
+
+This is not an auto-reconnect service or verified 24/7 unattended mode. It
+covers an unexpected tunnel process exit; other network faults may require
+manual troubleshooting and a fresh start.
+
 ## BCN signal monitoring
 
 The BCN Media panel now includes an operator-only **BCN Signal Monitor**. It

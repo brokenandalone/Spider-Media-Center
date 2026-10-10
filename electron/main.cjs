@@ -24,6 +24,17 @@ const {
 const { MediaCompatibility } = require('./media-compatibility.cjs');
 const { nativeNova } = require('./nova-service.cjs');
 const nova = nativeNova();
+const { BcnDesk } = require('./bcn-desk.cjs');
+let bcnDesk;
+function programmingDesk() {
+  return bcnDesk ||= new BcnDesk({ file: path.join(app.getPath('userData'), 'bcn-desk.json') });
+}
+function trustedMediaSender(event) {
+  if (!mainWindow || event.sender !== mainWindow.webContents) {
+    throw new Error('Untrusted BCN control request');
+  }
+}
+
 let mediaCompatibility;
 function compatibility() {
   const configured = process.env.XDG_CACHE_HOME;
@@ -1188,12 +1199,39 @@ async function startRadioServer(profile) {
 
 ipcMain.handle('app:info', () => ({ version: app.getVersion(), packaged: app.isPackaged }));
 ipcMain.handle('nova:health', (event) => {
-  if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error('Untrusted Nova health request');
+  trustedMediaSender(event);
   return nova.health();
 });
-ipcMain.handle('nova:prepare', (event, payload) => {
-  if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error('Untrusted Nova DJ request');
-  return nova.prepare(payload);
+ipcMain.handle('bcn:desk-state', (event) => {
+  trustedMediaSender(event);
+  return programmingDesk().state();
+});
+ipcMain.handle('bcn:desk-add-show', (event, value) => {
+  trustedMediaSender(event);
+  return programmingDesk().addShow(value);
+});
+ipcMain.handle('bcn:desk-remove-show', (event, id) => {
+  trustedMediaSender(event);
+  return programmingDesk().removeShow(id);
+});
+ipcMain.handle('bcn:desk-add-request', (event, value) => {
+  trustedMediaSender(event);
+  return programmingDesk().addRequest(value);
+});
+ipcMain.handle('bcn:desk-review-request', (event, id, approved) => {
+  trustedMediaSender(event);
+  return programmingDesk().reviewRequest(id, approved === true);
+});
+ipcMain.handle('nova:prepare', async (event, payload) => {
+  trustedMediaSender(event);
+  const control = programmingDesk();
+  const planned = control.planBreak(payload);
+  const prepared = await nova.prepare(planned.payload);
+  if (!control.stillApproved(planned)) {
+    throw new Error('A BCN request was withdrawn before Nova prepared it');
+  }
+  control.commitBreak(planned);
+  return prepared;
 });
 
 ipcMain.handle('media:prepare-compatibility', async (event, url) => {

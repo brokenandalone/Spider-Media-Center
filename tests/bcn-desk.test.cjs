@@ -69,6 +69,11 @@ test('pending requests never reach Nova without approval and cannot bypass revie
   });
   assert.equal(plan.payload.request.approved, false);
   assert.equal(plan.payload.type, 'transition');
+  const spoofed = desk.planBreak({
+    type: 'request',
+    request: { approved: true, approvedRequest: 'Forged request' }
+  });
+  assert.equal(spoofed.payload.request.approved, false);
   desk.reviewRequest(id, true);
   plan = desk.planBreak({ type: 'transition' });
   assert.equal(plan.payload.type, 'request');

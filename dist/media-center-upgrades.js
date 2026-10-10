@@ -545,6 +545,17 @@
       signalChecking = true;
       try {
         const signal = await window.spider.radioDiagnostics();
+        recoveryState = signal.recovery || null;
+        restoreRelay.hidden = !recoveryState?.lost;
+        restoreRelay.disabled = !recoveryState?.available;
+        if (recoveryState?.lost) {
+          restoreStatus.textContent = recoveryState.reason + ' ' +
+            (recoveryState.attemptsRemaining === 0
+              ? 'Recovery limit reached. Start a new manual broadcast.'
+              : recoveryState.retryAfterSeconds > 0
+                ? 'Retry available in ' + recoveryState.retryAfterSeconds + ' seconds.'
+                : 'Confirm rights, then restore the relay. The link will change.');
+        }
         const descriptions = {
           off_air: 'OFF AIR. No public radio stream is running.',
           relay_not_ready: 'Relay starting or unavailable. No verified public stream.',
@@ -559,6 +570,9 @@
           signal.stalledListeners + ' stalled · ' +
           signal.chunksWritten + ' chunks delivered · ' +
           signal.slowDisconnects + ' slow clients disconnected';
+        if (continuityArmed && recoveryState?.lost) {
+          disarmContinuity('The public relay dropped. Continuity is disarmed until the operator restores BCN.');
+        }
         if (continuityArmed && signal.status === 'stalled') {
           disarmContinuity('Listener delivery stalled. Continuity disarmed; check the radio encoder and relay before rearming.');
         }
@@ -573,6 +587,46 @@
       type: 'button', className: 'bcn-small-button', text: 'Check radio signal',
       onclick: refreshSignal
     });
+    // A manually approved restoration ONLY after the previous public tunnel
+    // exited unexpectedly. Every recovery rotates the public listener URL.
+    const restoreRights = el('input', {
+      type: 'checkbox', 'aria-label': 'Confirm broadcast permissions for relay recovery'
+    });
+    const restoreStatus = el('p', {
+      className: 'bcn-muted',
+      text: 'No relay recovery is needed. Manual broadcast controls remain available.'
+    });
+    let recoveryState = null;
+    const restoreRelay = el('button', {
+      type: 'button', className: 'bcn-small-button', text: 'Restore BCN relay', hidden: '',
+      onclick: async () => {
+        if (!restoreRights.checked) {
+          restoreStatus.textContent = 'Confirm you still have permission to broadcast this queued content.';
+          return;
+        }
+        if (!recoveryState?.available) {
+          restoreStatus.textContent = 'Recovery is unavailable. Check the signal and retry cooldown.';
+          return;
+        }
+        restoreRelay.disabled = true;
+        restoreStatus.textContent = 'Creating a new public relay. The previous listener link will expire…';
+        try {
+          const result = await window.spider.radioRecover();
+          if (result?.active !== true || !result?.publicUrl) throw new Error('The new public relay did not confirm an active link.');
+          restoreRights.checked = false;
+          restoreStatus.textContent = 'BCN relay restored. IMPORTANT: Share the NEW listener link or QR code. The previous URL is invalid.';
+          // Engine receives a radio:live event and updates the existing
+          // broadcast player; do not start a second broadcaster.
+          await refreshSignal();
+        } catch (error) {
+          restoreStatus.textContent = 'Relay restoration failed: ' + (error?.message || String(error));
+          await refreshSignal();
+        } finally {
+          restoreRelay.disabled = !recoveryState?.available;
+        }
+      }
+    });
+
 
     const novaStatus = el('p', { className: 'bcn-muted', text: 'Nova runs through the native Spider OS DJ service.' });
     const refreshNova = async () => {
@@ -750,7 +804,16 @@
           text: 'Distinguishes a public relay from data delivery to listener sockets. Connected audio is not proof of playback or audibility on the listener device.' }),
         signalStatus,
         signalCounters,
-        checkSignal
+        checkSignal,
+        el('div', { className: 'bcn-section' },
+          el('h3', { text: 'Operator Relay Recovery' }),
+          el('p', { className: 'bcn-muted',
+            text: 'Available only when a public relay unexpectedly disconnects. This is never automatic. Temporary Cloudflare links rotate after recovery, so listeners must use the new URL.' }),
+          el('label', { className: 'bcn-row' }, restoreRights,
+            el('span', { text: 'I confirm I still have broadcast rights for the queued content.' })),
+          restoreStatus,
+          restoreRelay
+        )
       ),
       el('div', { className: 'bcn-section' },
         el('h3', { text: 'Nova · Native AI DJ' }),
@@ -789,6 +852,15 @@
     });
     if (window.spider?.onRadioEvent) {
       window.spider.onRadioEvent(event => {
+        if (event?.type === 'relay-lost') {
+          restoreRights.checked = false;
+          disarmContinuity('Public relay lost. Operator recovery required.');
+          void refreshSignal();
+        }
+        if (event?.type === 'relay-restored') {
+          restoreRights.checked = false;
+          void refreshSignal();
+        }
         if (event?.type === 'stopped') disarmContinuity('BCN stopped. Continuity was disarmed.');
         if (event?.type === 'stopped') void refreshSignal();
         if (event?.type === 'bcn-listener-request' || event?.type === 'stopped') {

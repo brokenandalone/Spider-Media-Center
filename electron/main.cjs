@@ -27,6 +27,7 @@ const nova = nativeNova();
 const { BcnDesk } = require('./bcn-desk.cjs');
 const { BcnListenerIntake } = require('./bcn-listener-intake.cjs');
 const { RadioTelemetry } = require('./radio-telemetry.cjs');
+const { RadioRecoveryState, safeProfile } = require('./radio-recovery.cjs');
 let bcnDesk;
 function programmingDesk() {
   return bcnDesk ||= new BcnDesk({ file: path.join(app.getPath('userData'), 'bcn-desk.json') });
@@ -114,6 +115,13 @@ const serviceWindows = new Map();
 const sharedFiles = new Map();
 const radioListeners = new Map();
 const radioTelemetry = new RadioTelemetry();
+const radioRecovery = new RadioRecoveryState();
+let radioOperation = Promise.resolve();
+function serializeRadioOperation(action) {
+  const next = radioOperation.then(action, action);
+  radioOperation = next.catch(() => {});
+  return next;
+}
 let radioServer;
 let radioRequestIntake;
 let radioTunnel;
@@ -1206,10 +1214,18 @@ async function startRadioServer(profile) {
 
   // The renderer must go off air if an established relay later exits.
   const establishedTunnel = radioTunnel;
-  establishedTunnel.once('exit', () => {
-    if (radioTunnel === establishedTunnel) {
-      void stopRadioServer().catch((error) => writeDiagnostic('radio-stop', error));
-    }
+  establishedTunnel.once('exit', (code, signal) => {
+    if (radioTunnel !== establishedTunnel) return;
+    // The established public address has died. Freeze new listener intake,
+    // close the old stream and require the operator to approve a NEW URL.
+    const reason = 'Public relay exited unexpectedly (' +
+      (signal ? 'signal ' + signal : 'code ' + String(code)) + ').';
+    radioRecovery.relayLost(reason);
+    void serializeRadioOperation(async () => {
+      if (radioTunnel !== establishedTunnel) return;
+      await stopRadioServer();
+      sendRadioEvent({ type: 'relay-lost', reason, recovery: radioRecovery.retryState(false) });
+    }).catch(error => writeDiagnostic('radio-stop', error));
   });
   radioState.publicUrl = `${publicBase}/${token}`;
   radioState.qrDataUrl = await QRCode.toDataURL(radioState.publicUrl, { width: 360, margin: 1, color: { dark: '#261033', light: '#f2e5ff' } });
@@ -1390,11 +1406,36 @@ ipcMain.handle('party:resolve-request', (_event, id, resolution) => {
 });
 ipcMain.handle('radio:start', (event, profile) => {
   trustedMediaSender(event);
-  return startRadioServer(profile);
+  return serializeRadioOperation(async () => {
+    const checked = safeProfile(profile);
+    const session = await startRadioServer(checked);
+    radioRecovery.manualStart(checked);
+    return session;
+  });
 });
 ipcMain.handle('radio:stop', (event) => {
   trustedMediaSender(event);
-  return stopRadioServer();
+  return serializeRadioOperation(async () => {
+    // An intentional stop revokes the recovery option, permanently stopping
+    // any queued/manual retry until the operator starts a new session.
+    radioRecovery.manualStop();
+    return stopRadioServer();
+  });
+});
+ipcMain.handle('radio:recover', (event) => {
+  trustedMediaSender(event);
+  return serializeRadioOperation(async () => {
+    const checked = radioRecovery.beginRecovery(radioState.active);
+    try {
+      const session = await startRadioServer(checked);
+      radioRecovery.recovered();
+      sendRadioEvent({ type: 'relay-restored', freshLinkRequired: true });
+      return { ...session, freshLinkRequired: true };
+    } catch (error) {
+      radioRecovery.relayLost('Reconnect attempt failed. Check the internet connection.');
+      throw error;
+    }
+  });
 });
 ipcMain.handle('radio:update', (event, metadata) => {
   trustedMediaSender(event);
@@ -1407,10 +1448,13 @@ ipcMain.handle('radio:update', (event, metadata) => {
 });
 ipcMain.handle('radio:diagnostics', (event) => {
   trustedMediaSender(event);
-  return radioTelemetry.snapshot({
-    active: radioState.active,
-    publicUrl: radioState.publicUrl
-  });
+  return {
+    ...radioTelemetry.snapshot({
+      active: radioState.active,
+      publicUrl: radioState.publicUrl
+    }),
+    recovery: radioRecovery.retryState(radioState.active)
+  };
 });
 ipcMain.on('radio:chunk', (event, listenerId, bytes) => {
   // Streaming payloads are accepted only from the trusted playback window.

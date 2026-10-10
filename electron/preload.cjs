@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('spider', {
   partyState: (state) => invoke('party:set-state', state),
   resolveRequest: (id, resolution) => invoke('party:resolve-request', id, resolution),
   startRadio: (profile) => invoke('radio:start', profile),
+  radioDiagnostics: () => invoke('radio:diagnostics'),
   stopRadio: () => invoke('radio:stop'),
   updateRadio: (metadata) => invoke('radio:update', metadata),
   radioChunk: (listenerId, bytes) => ipcRenderer.send('radio:chunk', listenerId, bytes),

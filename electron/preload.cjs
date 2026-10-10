@@ -14,7 +14,6 @@ contextBridge.exposeInMainWorld('spider', {
   openWebPage: (url) => invoke('web:open', url),
   loadIptvPlaylist: (url) => invoke('iptv:load', url),
   searchRadioDirectory: (options) => invoke('radio:directory-search', options || {}),
-  portableDjInfo: () => invoke('dj:portable-info'),
   openBluetooth: () => invoke('devices:open-bluetooth'),
   startNearby: () => invoke('nearby:start'),
   stopNearby: () => invoke('nearby:stop'),

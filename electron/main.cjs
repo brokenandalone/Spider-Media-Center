@@ -26,6 +26,7 @@ const { nativeNova } = require('./nova-service.cjs');
 const nova = nativeNova();
 const { BcnDesk } = require('./bcn-desk.cjs');
 const { BcnListenerIntake } = require('./bcn-listener-intake.cjs');
+const { RadioTelemetry } = require('./radio-telemetry.cjs');
 let bcnDesk;
 function programmingDesk() {
   return bcnDesk ||= new BcnDesk({ file: path.join(app.getPath('userData'), 'bcn-desk.json') });
@@ -112,6 +113,7 @@ const partyVotes = new Map();
 const serviceWindows = new Map();
 const sharedFiles = new Map();
 const radioListeners = new Map();
+const radioTelemetry = new RadioTelemetry();
 let radioServer;
 let radioRequestIntake;
 let radioTunnel;
@@ -1049,6 +1051,7 @@ async function stopRadioServer() {
     try { response.end(); } catch { }
   }
   radioListeners.clear();
+  radioTelemetry.reset();
   radioRequestIntake = undefined;
   if (bcnDesk) bcnDesk.setListenerRequestsEnabled(false);
   if (radioTunnel) {
@@ -1138,10 +1141,12 @@ async function startRadioServer(profile) {
       if (response.socket) response.socket.setNoDelay(true);
       response.flushHeaders();
       radioListeners.set(id, response);
+      radioTelemetry.connect(id);
       radioState.listenerCount = radioListeners.size;
       sendRadioEvent({ type: 'listener-connected', id, listenerCount: radioListeners.size });
       request.on('close', () => {
         if (!radioListeners.delete(id)) return;
+        radioTelemetry.disconnect(id);
         radioState.listenerCount = radioListeners.size;
         sendRadioEvent({ type: 'listener-disconnected', id, listenerCount: radioListeners.size });
       });
@@ -1383,9 +1388,16 @@ ipcMain.handle('party:resolve-request', (_event, id, resolution) => {
   const [item] = guestRequests.splice(index, 1);
   return { ok: true, item, resolution };
 });
-ipcMain.handle('radio:start', (_event, profile) => startRadioServer(profile));
-ipcMain.handle('radio:stop', () => stopRadioServer());
-ipcMain.handle('radio:update', (_event, metadata) => {
+ipcMain.handle('radio:start', (event, profile) => {
+  trustedMediaSender(event);
+  return startRadioServer(profile);
+});
+ipcMain.handle('radio:stop', (event) => {
+  trustedMediaSender(event);
+  return stopRadioServer();
+});
+ipcMain.handle('radio:update', (event, metadata) => {
+  trustedMediaSender(event);
   if (!radioState.active) return { ok: false };
   radioState.nowPlaying = metadata && metadata.title ? {
     title: String(metadata.title).slice(0, 140),
@@ -1393,10 +1405,37 @@ ipcMain.handle('radio:update', (_event, metadata) => {
   } : null;
   return { ok: true };
 });
-ipcMain.on('radio:chunk', (_event, listenerId, bytes) => {
+ipcMain.handle('radio:diagnostics', (event) => {
+  trustedMediaSender(event);
+  return radioTelemetry.snapshot({
+    active: radioState.active,
+    publicUrl: radioState.publicUrl
+  });
+});
+ipcMain.on('radio:chunk', (event, listenerId, bytes) => {
+  // Streaming payloads are accepted only from the trusted playback window.
+  if (!mainWindow || event.sender !== mainWindow.webContents) return;
   const response = radioListeners.get(listenerId);
-  if (!response || response.destroyed || response.writableEnded) return;
-  try { response.write(Buffer.from(bytes)); } catch { }
+  if (!radioState.active || !response || response.destroyed || response.writableEnded) return;
+  if (!(bytes instanceof Uint8Array) && !(bytes instanceof ArrayBuffer)) return;
+  const size = bytes.byteLength;
+  if (!Number.isSafeInteger(size) || size < 1 || size > 1024 * 1024) return;
+  // MediaRecorder sends unacknowledged IPC packets. Disconnect a persistently
+  // slow receiver rather than accumulating unbounded server-side buffers.
+  if (response.writableLength > 2 * 1024 * 1024) {
+    radioTelemetry.disconnect(listenerId, 'backpressure');
+    radioListeners.delete(listenerId);
+    radioState.listenerCount = radioListeners.size;
+    try { response.destroy(); } catch {}
+    sendRadioEvent({ type: 'listener-disconnected', id: listenerId, listenerCount: radioListeners.size });
+    return;
+  }
+  try {
+    response.write(Buffer.from(bytes));
+    radioTelemetry.written(listenerId, size);
+  } catch {
+    try { response.destroy(); } catch {}
+  }
 });
 ipcMain.handle('window:set-mini', (_event, enabled) => {
   if (!mainWindow || mainWindow.isDestroyed()) return { ok: false };

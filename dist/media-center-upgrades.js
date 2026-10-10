@@ -530,6 +530,50 @@
       }
     };
 
+    const signalStatus = el('p', {
+      className: 'bcn-muted',
+      role: 'status',
+      text: 'Signal monitor not checked. ON AIR only means the relay was opened.'
+    });
+    const signalCounters = el('p', {
+      className: 'bcn-muted',
+      text: 'No listener delivery has been verified.'
+    });
+    let signalChecking = false;
+    const refreshSignal = async () => {
+      if (signalChecking || !window.spider?.radioDiagnostics) return;
+      signalChecking = true;
+      try {
+        const signal = await window.spider.radioDiagnostics();
+        const descriptions = {
+          off_air: 'OFF AIR. No public radio stream is running.',
+          relay_not_ready: 'Relay starting or unavailable. No verified public stream.',
+          no_listeners: 'Relay connected. No listeners; delivered audio cannot be verified.',
+          waiting_for_first_audio: 'Listener connected. Waiting for the first encoded audio chunks.',
+          sending: 'Audio chunks are reaching connected listener sockets.',
+          stalled: 'WARNING: One or more listener streams have stopped receiving audio chunks.'
+        };
+        signalStatus.textContent = descriptions[signal.status] || 'Unknown radio delivery condition.';
+        signalCounters.textContent = signal.connectedListeners + ' connected · ' +
+          signal.flowingListeners + ' receiving chunks · ' +
+          signal.stalledListeners + ' stalled · ' +
+          signal.chunksWritten + ' chunks delivered · ' +
+          signal.slowDisconnects + ' slow clients disconnected';
+        if (continuityArmed && signal.status === 'stalled') {
+          disarmContinuity('Listener delivery stalled. Continuity disarmed; check the radio encoder and relay before rearming.');
+        }
+      } catch (error) {
+        signalStatus.textContent = 'Signal monitor unavailable. Audio delivery cannot be verified: ' +
+          (error?.message || String(error));
+      } finally {
+        signalChecking = false;
+      }
+    };
+    const checkSignal = el('button', {
+      type: 'button', className: 'bcn-small-button', text: 'Check radio signal',
+      onclick: refreshSignal
+    });
+
     const novaStatus = el('p', { className: 'bcn-muted', text: 'Nova runs through the native Spider OS DJ service.' });
     const refreshNova = async () => {
       novaStatus.textContent = 'Checking Nova on Spider OS…';
@@ -701,6 +745,14 @@
         el('div', { className: 'bcn-row' }, webUrl, openWebsite, playDirect)
       ),
       el('div', { className: 'bcn-section' },
+        el('h3', { text: 'BCN Signal Monitor' }),
+        el('p', { className: 'bcn-muted',
+          text: 'Distinguishes a public relay from data delivery to listener sockets. Connected audio is not proof of playback or audibility on the listener device.' }),
+        signalStatus,
+        signalCounters,
+        checkSignal
+      ),
+      el('div', { className: 'bcn-section' },
         el('h3', { text: 'Nova · Native AI DJ' }),
         novaStatus,
         checkNova
@@ -733,17 +785,21 @@
 
     launcher.addEventListener('click', () => {
       panel.classList.toggle('bcn-hidden');
-      if (!panel.classList.contains('bcn-hidden')) { void refreshNova(); void refreshProgramming(); }
+      if (!panel.classList.contains('bcn-hidden')) { void refreshNova(); void refreshProgramming(); void refreshSignal(); }
     });
     if (window.spider?.onRadioEvent) {
       window.spider.onRadioEvent(event => {
         if (event?.type === 'stopped') disarmContinuity('BCN stopped. Continuity was disarmed.');
+        if (event?.type === 'stopped') void refreshSignal();
         if (event?.type === 'bcn-listener-request' || event?.type === 'stopped') {
           void refreshProgramming();
         }
       });
     }
-    window.setInterval(checkContinuity, 5000);
+    window.setInterval(() => {
+      checkContinuity();
+      if (continuityArmed || !panel.classList.contains('bcn-hidden')) void refreshSignal();
+    }, 5000);
     document.body.append(launcher, panel);
 
   }

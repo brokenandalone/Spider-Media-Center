@@ -1,7 +1,7 @@
 'use strict';
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {BUILT_INS,MAX_CUSTOM,cleanPreset,readCustom,PresetBank,FrameHealth}=require('../dist/visualizer-presets.js');
+const {BUILT_INS,MAX_CUSTOM,cleanPreset,readCustom,PresetBank,FrameHealth,SceneRotation}=require('../dist/visualizer-presets.js');
 test('eight bundled visualizer scenes are distinct and valid',()=>{
   assert.equal(BUILT_INS.length,8);
   assert.equal(new Set(BUILT_INS.map(x=>x.id)).size,8);
@@ -44,4 +44,19 @@ test('GPU frame health samples render FPS and counts failures without collecting
   assert.equal(h.snapshot().frames,121);
   h.reset();
   assert.equal(h.snapshot().frames,0);
+});
+
+test('auto scene rotation advances only during active playback at bounded intervals',()=>{
+  const sequence=new SceneRotation(90000);
+  assert.equal(sequence.tick(100,true),null);
+  assert.equal(sequence.tick(50000,true),null);
+  assert.equal(sequence.tick(90100,true).id,'neon-tunnel');
+  assert.equal(sequence.tick(180100,true).id,'bcn-broadcast');
+  assert.equal(sequence.tick(200000,false),null);
+  assert.equal(sequence.tick(300000,true),null);
+  assert.equal(sequence.tick(390000,true).id,'broken-city');
+  assert.equal(new SceneRotation(100).intervalMs,30000);
+  assert.equal(new SceneRotation(900000).intervalMs,300000);
+  assert.equal(sequence.tick(NaN,true),null);
+  assert.equal(sequence.tick(400000,true,[]),null);
 });

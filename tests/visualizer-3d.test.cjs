@@ -299,3 +299,20 @@ test('fullscreen lifecycle registers one listener and one style across hundreds 
   assert.doesNotMatch(body,/createElement\('style'/);
   assert.match(source,/cinemaStyle.id='spider3dCinemaStyle'/);
 });
+
+test('starting a movie during fullscreen cinema exits without stopping playback',async()=>{
+  const h=harness();
+  h.document.fullscreenElement=null;
+  h.stage.requestFullscreen=async()=>{h.document.fullscreenElement=h.stage;};
+  h.document.exitFullscreen=async()=>{h.document.fullscreenElement=null;};
+  h.frame(100);
+  const cinema=h.stage.children.find(e=>e.id==='spider3dControls').children.find(e=>e.attributes['aria-label']==='Toggle immersive fullscreen 3D cinema');
+  cinema.events.click();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(h.document.fullscreenElement,h.stage);
+  h.window.__spiderVisualizerSnapshot=()=>({mode:'3d-tunnel',isVideo:true,playing:true,lightweight:false,bands:new Uint8Array(1024)});
+  h.frame(200);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(h.document.fullscreenElement,null);
+  assert.equal(h.stage.children.find(e=>e.id==='spider3dCanvas').style.display,'none');
+});

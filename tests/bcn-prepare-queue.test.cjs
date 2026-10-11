@@ -66,13 +66,20 @@ test('operator withdrawal during Nova speech generation stops any request commit
     control.addRequest('Withdrawing this dedication');
     const id=control.requests[0].id;
     control.reviewRequest(id,true);
+    let enter;
+    let finish;
+    const entered=new Promise(resolve=>{enter=resolve;});
+    const completed=new Promise(resolve=>{finish=resolve;});
     const pending=queue.enqueue(async()=>{
       const plan=control.planBreak({type:'transition'});
-      await new Promise(resolve=>setTimeout(resolve,20));
+      enter();
+      await completed;
       if (!control.stillApproved(plan)) throw Error('request withdrawn');
       control.commitBreak(plan);
     });
+    await entered;
     control.reviewRequest(id,false);
+    finish();
     await assert.rejects(pending,/withdrawn/);
     assert.equal(control.requests[0].status,'rejected');
   } finally { cleanup(); }

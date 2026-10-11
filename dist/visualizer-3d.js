@@ -103,6 +103,24 @@
       input.style.cssText='color:#f2d9ff;background:#180d25;border:1px solid #9851c4;border-radius:7px;font:11px system-ui;padding:6px;max-width:170px';
     }
     controls.append(selector,qualitySelect,status);
+    // The React player already supplies a fullscreen control. The classic
+    // player gets the same affordance without modifying its legacy layout.
+    if (!parent.querySelector?.('.visualizer-fullscreen')) {
+      const full=document.createElement('button');
+      full.type='button';
+      full.textContent='FULLSCREEN';
+      full.setAttribute('aria-label','Toggle fullscreen visualizer');
+      full.style.cssText='color:#f2d9ff;background:#180d25;border:1px solid #9851c4;border-radius:7px;font:11px system-ui;padding:6px;cursor:pointer';
+      full.addEventListener('click',async()=>{
+        try {
+          if (document.fullscreenElement) await document.exitFullscreen();
+          else await parent.requestFullscreen();
+        } catch(error) {
+          window.dispatchEvent(new CustomEvent('spider:notice',{detail:{message:'Fullscreen unavailable: '+String(error?.message||'unsupported')}}));
+        }
+      });
+      controls.append(full);
+    }
     parent.append(controls);
   }
   function findStage(){
@@ -139,6 +157,7 @@
     const width=Math.max(2,Math.floor(bounds.width*targetScale*reduce));
     const height=Math.max(2,Math.floor(bounds.height*targetScale*reduce));
     if(canvas.width!==width||canvas.height!==height){canvas.width=width;canvas.height=height;}
+    if(status && status.textContent!=='3D GPU ACTIVE')status.textContent='3D GPU ACTIVE';
     const {gl,program,quad,position,texture,uniforms,smoothed}=gpu;
     const bins=snapshot.bands;
     for(let i=0;i<64;i++){

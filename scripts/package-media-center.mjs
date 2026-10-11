@@ -48,6 +48,7 @@ try {
   if (entries.some(n => n.includes('.before-') || n.includes('/@electron/asar/'))) throw new Error('Development files entered the archive.');
   fs.copyFileSync(path.join(root, 'scripts/install-media-center.sh'), path.join(output, 'install-media-center.sh'));
   fs.copyFileSync(path.join(root, 'scripts/install-v7-preview.sh'), path.join(output, 'install-v7-preview.sh'));
+  fs.copyFileSync(path.join(root, 'scripts/install-v7-with-v6-nova.sh'), path.join(output, 'install-v7-with-v6-nova.sh'));
   fs.copyFileSync(path.join(root, 'docs/INSTALL-BUILD.md'), path.join(output, 'README.md'));
   let revision = process.env.SPIDER_BUILD_REVISION || process.env.GITHUB_SHA || 'unknown';
   if (revision === 'unknown') {
@@ -79,7 +80,7 @@ try {
     archiveEntries: entries.length,
     installedPlaybackVerified: false
   }, null, 2) + '\n');
-  const deliverables = ['app.asar', 'install-media-center.sh', 'install-v7-preview.sh', 'README.md', 'build.json'];
+  const deliverables = ['app.asar', 'install-media-center.sh', 'install-v7-preview.sh', 'install-v7-with-v6-nova.sh', 'README.md', 'build.json'];
   fs.writeFileSync(path.join(output, 'SHA256SUMS'), deliverables.map(n => hash(fs.readFileSync(path.join(output, n))) + '  ' + n + '\n').join(''));
   console.log(`Verified Media Center ASAR (${entries.length} entries): ${archive}`);
 } finally { fs.rmSync(stage, { recursive: true, force: true }); }

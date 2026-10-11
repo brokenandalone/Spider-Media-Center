@@ -87,38 +87,73 @@ PYTHONPYCACHEPREFIX="$WORK/python-cache" python3 -m py_compile \
 echo 'Native Nova personality and service verified against pinned Spider OS commit.'
 
 # Preserve a user-owned copy of the successful package alongside Studio.
-SAVED="$HOME/Studio/Media/SpiderMediaCenter/v1.0/installed-builds/bcn-nova-$SOURCE_COMMIT"
+RELEASE_VERSION="$(python3 - "$WORK/release/build.json" <<'PY'
+import json, re, sys
+version = str(json.load(open(sys.argv[1], encoding='utf-8')).get('version', ''))
+if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
+    raise SystemExit('The release has invalid version metadata; installation stopped.')
+print(version)
+PY
+)"
+SAVED="$HOME/Studio/Media/SpiderMediaCenter/v$RELEASE_VERSION/installed-builds/bcn-nova-$SOURCE_COMMIT"
 mkdir -p "$SAVED"
 cp -a -- "$WORK/release/." "$SAVED/"
 printf 'Release files retained in: %s\n' "$SAVED"
 
 echo 'Installing verified Media Center and upgrading the EXISTING Spider OS Nova service.'
-sudo bash "$SAVED/install-media-center.sh"
+# Native DJ validation happens after Media Center installation; preserve a
+# paired archive snapshot so a failed Python upgrade can undo BOTH changes.
+ASAR_BACKUP="$TARGET.before-bcn-pair-$(date +%Y%m%d-%H%M%S)-$"
+sudo cp -a -- "$TARGET" "$ASAR_BACKUP" ||
+  fail "Could not back up the existing Media Center archive; nothing was upgraded."
+restore_media_center() {
+  echo 'Restoring the pre-upgrade Media Center archive.'
+  sudo cp -a -- "$ASAR_BACKUP" "$TARGET" ||
+    echo "Automatic Media Center restoration failed. Manual backup: $ASAR_BACKUP" >&2
+}
+if ! sudo bash "$SAVED/install-media-center.sh"; then
+  restore_media_center
+  fail 'Media Center installation failed; the original archive was restored.'
+fi
 
 NOVA_BACKUP="$NOVA_TARGET/service.py.before-bcn-$(date +%Y%m%d-%H%M%S)-$"
-sudo cp -a -- "$NOVA_TARGET/service.py" "$NOVA_BACKUP"
+if ! sudo cp -a -- "$NOVA_TARGET/service.py" "$NOVA_BACKUP"; then
+  restore_media_center
+  fail 'Could not back up the native Nova service; Media Center has been restored.'
+fi
 if [[ -f "$NOVA_TARGET/nova_host.py" ]]; then
-  sudo cp -a -- "$NOVA_TARGET/nova_host.py" "$NOVA_BACKUP.persona"
+  if ! sudo cp -a -- "$NOVA_TARGET/nova_host.py" "$NOVA_BACKUP.persona"; then
+    restore_media_center
+    fail 'Could not back up the native Nova persona; Media Center has been restored.'
+  fi
 fi
 
 # Keep both exact native sources in the user-owned package for future audit.
 cp -a -- "$WORK/nova/service.py" "$WORK/nova/nova_host.py" "$SAVED/"
-sudo install -m644 -- "$WORK/nova/nova_host.py" "$NOVA_TARGET/nova_host.py"
-sudo install -m644 -- "$WORK/nova/service.py" "$NOVA_TARGET/service.py"
+restore_nova() {
+  sudo cp -a -- "$NOVA_BACKUP" "$NOVA_TARGET/service.py" || true
+  if [[ -f "$NOVA_BACKUP.persona" ]]; then
+    sudo cp -a -- "$NOVA_BACKUP.persona" "$NOVA_TARGET/nova_host.py" || true
+  else
+    sudo rm -f -- "$NOVA_TARGET/nova_host.py" || true
+  fi
+  systemctl --user restart spider-ai-dj.service 2>/dev/null || true
+}
+if ! sudo install -m644 -- "$WORK/nova/nova_host.py" "$NOVA_TARGET/nova_host.py" ||
+   ! sudo install -m644 -- "$WORK/nova/service.py" "$NOVA_TARGET/service.py"; then
+  restore_nova
+  restore_media_center
+  fail 'Native Nova source installation failed. Previous Nova and Media Center files restored.'
+fi
 echo "Existing native Nova service backed up to: $NOVA_BACKUP"
 
 if systemctl --user restart spider-ai-dj.service; then
   echo 'Restarted native Spider OS Nova user service.'
 else
-  echo 'Native service restart failed, restoring previous Python service files.'
-  sudo cp -a -- "$NOVA_BACKUP" "$NOVA_TARGET/service.py"
-  if [[ -f "$NOVA_BACKUP.persona" ]]; then
-    sudo cp -a -- "$NOVA_BACKUP.persona" "$NOVA_TARGET/nova_host.py"
-  else
-    sudo rm -f -- "$NOVA_TARGET/nova_host.py"
-  fi
-  systemctl --user restart spider-ai-dj.service 2>/dev/null || true
-  fail 'Nova service restart failed; its original sources have been restored. The Media Center app.asar backup was printed above.'
+  echo 'Native service restart failed, restoring both components.'
+  restore_nova
+  restore_media_center
+  fail 'Nova service restart failed. Previous Media Center and native Nova files were restored.'
 fi
 
 if python3 - <<'PY'
@@ -139,15 +174,10 @@ PY
 then
   echo 'Nova and BCN code installation completed.'
 else
-  echo 'Nova health check failed. Restoring the previous native DJ service.'
-  sudo cp -a -- "$NOVA_BACKUP" "$NOVA_TARGET/service.py"
-  if [[ -f "$NOVA_BACKUP.persona" ]]; then
-    sudo cp -a -- "$NOVA_BACKUP.persona" "$NOVA_TARGET/nova_host.py"
-  else
-    sudo rm -f -- "$NOVA_TARGET/nova_host.py"
-  fi
-  systemctl --user restart spider-ai-dj.service 2>/dev/null || true
-  fail "Nova health check failed, native service restored; the Media Center rollback command was printed above."
+  echo 'Nova health check failed. Restoring the original Media Center and Nova service.'
+  restore_nova
+  restore_media_center
+  fail 'Nova health check failed; both previous components were restored.'
 fi
 
 

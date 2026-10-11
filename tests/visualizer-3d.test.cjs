@@ -173,13 +173,16 @@ test('new 3D FFT snapshot reads both live decks without a second AudioContext',(
     currentItem:()=>({type:'audio'}),isVideoItem:()=>false,
     Math
   });
-  const actual=window.__spiderVisualizerSnapshot();
+  const withoutSample=window.__spiderVisualizerSnapshot();
+  assert.equal(withoutSample.playing,true);
+  assert.equal(reads,0);
+  const actual=window.__spiderVisualizerSnapshot({sampleAudio:true});
   assert.equal(actual.playing,true);
   assert.equal(actual.bands[0],60);
   assert.equal(actual.bands[1],99);
   assert.equal(reads,2);
   first.deck.paused=true;
-  const onlySecond=window.__spiderVisualizerSnapshot();
+  const onlySecond=window.__spiderVisualizerSnapshot({sampleAudio:true});
   assert.equal(onlySecond.bands[0],35);
   state.visualizerMode='web';
   assert.equal(window.__spiderVisualizerSnapshot().bands,null);

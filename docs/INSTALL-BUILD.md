@@ -1,3 +1,17 @@
+## V7 Cinema lifecycle acceptance (pending physical GPU test)
+
+The visualizer must register the fullscreen listener and stylesheet once,
+not once per animation frame. Automated regression checks exercise 300
+frames and ensure a single GPU canvas, control panel, scheduled frame,
+and fullscreen listener. A movie starting during cinema fullscreen must
+exit fullscreen and restore video without stopping audio or Nova.
+
+On the actual Spider OS computer, enter and exit Cinema Mode repeatedly
+for at least five minutes, switch from music to a movie, then return to
+music. Check GPU utilization, application memory growth and keyboard
+shortcuts. GitHub's mocked WebGL tests cannot prove hardware performance.
+The pinned V6 installer remains the last separately verified install path.
+
 # Media Center playback build
 
 ## Verify supervised BCN relay restoration

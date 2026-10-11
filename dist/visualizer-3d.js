@@ -295,6 +295,14 @@
     if(!snapshot)return;
     const is3d=MODES.includes(snapshot.mode);
     const visible=is3d&&!snapshot.isVideo;
+    // If a movie begins or the visualizer is switched off during cinema,
+    // restore the ordinary player immediately instead of trapping video.
+    if(!visible && cinemaActive()){
+      try{
+        const exiting=document.exitFullscreen?.();
+        if(exiting && typeof exiting.catch==='function')exiting.catch(()=>{});
+      }catch{}
+    }
     if(canvas.style.display!==(visible?'block':'none'))canvas.style.display=visible?'block':'none';
     if(oldCanvas)oldCanvas.style.visibility=visible?'hidden':oldCanvasVisibility;
     if(snapshot.mode!==modeShown){

@@ -212,11 +212,11 @@ const state = {
 // The legacy 2D renderer intentionally skips FFT work in a 3D mode, so
 // refresh these buffers here. Blend both decks during active crossfades.
 const visualizer3dBands = new Uint8Array(1024);
-window.__spiderVisualizerSnapshot = () => {
+window.__spiderVisualizerSnapshot = ({ sampleAudio = false } = {}) => {
   const mode = state.visualizerMode;
   const threeD = mode.startsWith('3d-');
   const active = state.audioGraphs.filter(graph => graph?.deck && !graph.deck.paused);
-  if (threeD) {
+  if (threeD && sampleAudio) {
     visualizer3dBands.fill(0);
     for (const graph of active) {
       graph.analyser.getByteFrequencyData(graph.frequencyData);

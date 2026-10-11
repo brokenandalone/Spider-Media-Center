@@ -245,6 +245,18 @@ leaving mismatched versions installed. Build receipts now live under a
 version-specific Studio/Media/SpiderMediaCenter folder. This installer does
 not update Spider OS itself.
 
+## Next release candidate: bounded BCN shutdown (not installed in V6)
+
+The upcoming Media Center patch closes the radio HTTP server with a short
+grace period before forcing any stuck live-listener connections closed.
+It also reports a bounded failure if the HTTP server cannot be shut down,
+rather than leaving the Stop / Restore button waiting indefinitely.
+
+This change is isolated on a development branch and **does not modify**
+the existing validated V6 installer or the default-branch release. The
+installer stays pinned to the already verified V6 commit until the next
+upgrade is separately approved for installation.
+
 ## BCN controlled relay recovery
 
 If the public Cloudflare Quick Tunnel **exits unexpectedly** after a confirmed

@@ -150,8 +150,15 @@ class BcnDesk {
     if (this.requests.filter(r => r.status === 'pending' || r.status === 'approved').length >= MAX_REQUESTS) {
       throw new Error('BCN request queue is full');
     }
+    // Retain every unreviewed or approved request. Expire only finished
+    // history when the bounded desk reaches capacity, never silently drop
+    // an unplayed listener dedication at the front of the queue.
+    if (this.requests.length >= MAX_REQUESTS) {
+      const finished = this.requests.findIndex(r => r.status === 'prepared' || r.status === 'rejected');
+      if (finished === -1) throw new Error('BCN request queue is full');
+      this.requests.splice(finished, 1);
+    }
     this.requests.push({ id: crypto.randomUUID(), text, source: source === 'listener' ? 'listener' : 'operator', status: 'pending', createdAt: this.clock().toISOString() });
-    this.requests = this.requests.slice(-MAX_REQUESTS);
     this.save();
     return this.state();
   }
@@ -172,6 +179,9 @@ class BcnDesk {
     const key = current ? current.id : null;
     const explicit = String(payload.type || 'transition') !== 'transition';
     const next = { ...payload, request: { approved: false }, context: { ...(payload.context && typeof payload.context === 'object' && !Array.isArray(payload.context) ? payload.context : {}) } };
+    // A caller cannot label an unapproved dedication as a request, even if
+    // it supplies type:'request' directly via the trusted renderer.
+    if (next.type === 'request') next.type = 'transition';
     if (current) {
       next.context.showName = current.name;
       next.context.tone = current.tone;

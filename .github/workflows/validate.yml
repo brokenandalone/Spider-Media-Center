@@ -24,6 +24,7 @@ jobs:
           node --check electron/network-directory.cjs
           node --check electron/nova-service.cjs
           node --check electron/bcn-desk.cjs
+          node --check electron/bcn-prepare-queue.cjs
           node --check electron/bcn-listener-intake.cjs
           node --check electron/radio-telemetry.cjs
           node --check electron/radio-recovery.cjs

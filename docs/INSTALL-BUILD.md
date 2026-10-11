@@ -12,6 +12,21 @@ phone audio. Normal **Stop broadcast** must not offer recovery. There is no
 automatic restart, no reuse of an expired listener link, and no second DJ
 daemon.
 
+## V6 Nova preparation and combined rollback verification
+
+The V6 Request Desk preserves pending and approved submissions when its
+history is full. Native Nova requests run through a bounded serial
+preparation queue; failed voice generation does not consume an approved
+dedication. Live speech and the actual radio relay still require end-to-end
+device checks.
+
+The consolidated Media Center/Nova installer checks its tested source SHA
+and build hash before changes. It now snapshots the original Media Center
+archive independently, snapshots the existing Nova service and persona, and
+restores both after failed native source installation, service restart or
+health confirmation. Previous installer backups remain available. The script
+does not perform Spider OS installation, kernel changes or OS upgrades.
+
 ## V6 reachability and version validation
 
 V6 checks the current temporary public BCN listener page roughly every 30

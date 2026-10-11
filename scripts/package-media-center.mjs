@@ -13,7 +13,7 @@ const output = path.resolve(process.argv[2] || path.join(root, 'release'));
 const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'spider-media-build-'));
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const runtime = ['main.cjs', 'preload.cjs', 'renderer.js', 'renderer.audio.js',
-  'renderer.bridge.js', 'network-directory.cjs', 'media-compatibility.cjs', 'nova-service.cjs', 'bcn-desk.cjs', 'bcn-listener-intake.cjs', 'radio-telemetry.cjs', 'radio-recovery.cjs', 'radio-relay-probe.cjs',
+  'renderer.bridge.js', 'network-directory.cjs', 'media-compatibility.cjs', 'nova-service.cjs', 'bcn-desk.cjs', 'bcn-prepare-queue.cjs', 'bcn-listener-intake.cjs', 'radio-telemetry.cjs', 'radio-recovery.cjs', 'radio-relay-probe.cjs',
   'player.html', 'offline.html', 'styles.css'];
 try {
   fs.mkdirSync(output, { recursive: true });

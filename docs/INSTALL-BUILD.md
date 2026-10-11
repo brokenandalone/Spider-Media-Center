@@ -1,8 +1,28 @@
+## Nova HTTP fix, verified on 2026-10-11
+
+Earlier V7/V6 combined installation attempts could update V7 and then fail the Nova
+health check. The root cause was `Handler.headers()` colliding with
+`BaseHTTPRequestHandler.headers`, which Python populates with an `HTTPMessage`
+during request parsing. The service source is fixed and tested with actual
+HTTP GET /health, OPTIONS, JSON 404, POST /dj/prepare and 500 responses.
+
+The combined installer now downloads the corrected immutable Spider OS commit
+`e9b13a65c26eb4975aebce13177f84c9190efb48` and starts the downloaded
+Nova Handler on an **ephemeral localhost port before backing up or modifying**
+any installed files. A failing HTTP response aborts before installation.
+The V6 legacy installer remains pinned to its separately verified baseline.
+
+Previously downloaded `Spider-Media-Center-Playback-Build` artifacts are
+immutable and still contain the old, broken Nova pin. Obtain a **new** GitHub
+Actions artifact built after this fix; reusing an older ZIP will repeat the
+failed installation. A successful health check after installation does not
+replace real-world GPU, TTS or BCN audio testing.
+
 # Unified V7 + V6 Nova installation
 
 A single release artifact now includes `install-v7-with-v6-nova.sh`.
 This installs **V7 Media Center** and refreshes the **existing V6 Nova
-service** from pinned Spider OS commit `980fccf98e4dfdfdb27b32a49c46158ca752a79c`.
+service** from fixed Spider OS commit `e9b13a65c26eb4975aebce13177f84c9190efb48`.
 The V6 playback, BCN, scheduling and request features remain in V7.
 This does not install a separate DJ daemon, nor alter Spider OS itself.
 

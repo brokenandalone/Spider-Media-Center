@@ -281,3 +281,21 @@ test('cinema refuses fullscreen while video is occupying the media stage',async(
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(entered,0);
 });
+
+test('fullscreen lifecycle registers one listener and one style across hundreds of frames',()=>{
+  const h=harness();
+  assert.equal(h.listener.size,2); // keydown and fullscreenchange
+  assert.equal(h.listener.has('fullscreenchange'),true);
+  for(let i=0;i<300;i++)h.frame(100+i*50);
+  assert.equal(h.listener.size,2);
+  assert.equal(h.stage.children.filter(e=>e.id==='spider3dCanvas').length,1);
+  assert.equal(h.stage.children.filter(e=>e.id==='spider3dControls').length,1);
+  assert.equal(h.frames.length,1);
+  const source=fs.readFileSync(path.join(root,'dist/visualizer-3d.js'),'utf8');
+  const start=source.indexOf('function loop(time){');
+  const end=source.indexOf("document.addEventListener('keydown'",start);
+  const body=source.slice(start,end);
+  assert.doesNotMatch(body,/addEventListener\('fullscreenchange'/);
+  assert.doesNotMatch(body,/createElement\('style'/);
+  assert.match(source,/cinemaStyle.id='spider3dCinemaStyle'/);
+});

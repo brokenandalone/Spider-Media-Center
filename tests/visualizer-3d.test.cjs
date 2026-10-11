@@ -154,3 +154,34 @@ test('React, classic player, renderer engine and release packager include all 3D
   assert.match(installer,/SOURCE_COMMIT='c8f95f74ecc93eb858801eb2025af8f151e5116e'/);
   assert.match(installer,/CI_RUN_ID='38127241699'/);
 });
+
+test('new 3D FFT snapshot reads both live decks without a second AudioContext',()=>{
+  const renderer=fs.readFileSync(path.join(root,'electron/renderer.js'),'utf8');
+  const start=renderer.indexOf('const visualizer3dBands = new Uint8Array(1024);');
+  const end=renderer.indexOf('const EQ_FREQUENCIES =',start);
+  assert.ok(start>0&&end>start);
+  let reads=0;
+  const graph=(a,b)=>({
+    deck:{paused:false},frequencyData:new Uint8Array(1024),
+    analyser:{getByteFrequencyData(destination){reads++;destination[0]=a;destination[1]=b;}}
+  });
+  const first=graph(60,25),second=graph(35,99);
+  const state={visualizerMode:'3d-spectrum',audioGraphs:[first,second],lightweightMode:false};
+  const window={};
+  vm.runInNewContext(renderer.slice(start,end),{
+    state,window,Uint8Array,
+    currentItem:()=>({type:'audio'}),isVideoItem:()=>false,
+    Math
+  });
+  const actual=window.__spiderVisualizerSnapshot();
+  assert.equal(actual.playing,true);
+  assert.equal(actual.bands[0],60);
+  assert.equal(actual.bands[1],99);
+  assert.equal(reads,2);
+  first.deck.paused=true;
+  const onlySecond=window.__spiderVisualizerSnapshot();
+  assert.equal(onlySecond.bands[0],35);
+  state.visualizerMode='web';
+  assert.equal(window.__spiderVisualizerSnapshot().bands,null);
+  assert.equal(reads,3);
+});

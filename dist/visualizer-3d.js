@@ -12,8 +12,10 @@
   const PRESET_KEY='spider.visualizer.3d.custom-presets';
   let presetBank=new presetKit.PresetBank();
   const frameHealth=new presetKit.FrameHealth();
+  const sceneRotation=new presetKit.SceneRotation(90000);
+  let autoScenes=false;
   let stage=null,canvas=null,controls=null,selector=null,qualitySelect=null,status=null;
-  let themeSelect=null,motionSelect=null,statsButton=null,stats=null,adaptiveButton=null,resetButton=null,theaterButton=null,presetSelect=null,savePresetButton=null,deletePresetButton=null;
+  let themeSelect=null,motionSelect=null,statsButton=null,stats=null,adaptiveButton=null,resetButton=null,theaterButton=null,presetSelect=null,savePresetButton=null,deletePresetButton=null,autoScenesButton=null;
   let oldCanvas=null,oldCanvasVisibility=null;
   let settings=performanceKit.sanitize();
   let gpu=null,unavailable=false,contextLost=false,lastFrame=0,modeShown='';
@@ -166,6 +168,16 @@
     presetSelect.setAttribute('aria-label','Cinematic visualizer scene presets');
     presetSelect.addEventListener('change',()=>applyPreset(presetSelect.value));
     refreshPresets();
+    autoScenesButton=document.createElement('button');
+    autoScenesButton.type='button';
+    autoScenesButton.setAttribute('aria-label','Toggle automatic cinematic scene rotation');
+    const syncAutoScenes=()=>{autoScenesButton.textContent=autoScenes?'AUTO SCENES ON':'AUTO SCENES OFF';};
+    autoScenesButton.addEventListener('click',()=>{
+      autoScenes=!autoScenes;
+      sceneRotation.reset();
+      syncAutoScenes();
+    });
+    syncAutoScenes();
     savePresetButton=document.createElement('button');
     savePresetButton.type='button';savePresetButton.textContent='SAVE SCENE';
     savePresetButton.setAttribute('aria-label','Save current visualizer settings as a custom scene');
@@ -241,10 +253,10 @@
     status.setAttribute('role','status');
     status.textContent='3D ready';
     status.style.cssText='font:10px system-ui;color:#d8b5ff;text-shadow:0 1px 2px black';
-    for(const input of [selector,presetSelect,savePresetButton,deletePresetButton,qualitySelect,themeSelect,motionSelect,adaptiveButton,statsButton,resetButton,theaterButton]){
+    for(const input of [selector,presetSelect,autoScenesButton,savePresetButton,deletePresetButton,qualitySelect,themeSelect,motionSelect,adaptiveButton,statsButton,resetButton,theaterButton]){
       input.style.cssText='color:#f2d9ff;background:#180d25;border:1px solid #9851c4;border-radius:7px;font:11px system-ui;padding:6px;max-width:170px';
     }
-    controls.append(selector,presetSelect,savePresetButton,deletePresetButton,qualitySelect,themeSelect,motionSelect,adaptiveButton,statsButton,resetButton,theaterButton,stats,status);
+    controls.append(selector,presetSelect,autoScenesButton,savePresetButton,deletePresetButton,qualitySelect,themeSelect,motionSelect,adaptiveButton,statsButton,resetButton,theaterButton,stats,status);
     // The React player already supplies a fullscreen control. The classic
     // player gets the same affordance without modifying its legacy layout.
     if (!parent.querySelector?.('.visualizer-fullscreen')) {
@@ -360,6 +372,7 @@
       modeShown=snapshot.mode;
     }
     presetSelect.hidden=!is3d;
+    autoScenesButton.hidden=!is3d;
     savePresetButton.hidden=!is3d;
     deletePresetButton.hidden=!is3d;
     qualitySelect.hidden=!is3d;
@@ -371,7 +384,14 @@
     statsButton.hidden=!is3d;
     stats.hidden=!is3d||!settings.showStats;
     status.hidden=!is3d;
-    if(!visible||document.hidden||unavailable||contextLost)return;
+    if(!visible||document.hidden||unavailable||contextLost){
+      sceneRotation.reset();
+      return;
+    }
+    if(autoScenes){
+      const next=sceneRotation.tick(time,snapshot.playing,presetBank.list());
+      if(next){applyPreset(next.id);return;}
+    }
     const fps=snapshot.lightweight?Math.min(QUALITY[quality].fps,15):QUALITY[quality].fps;
     if(time-lastFrame<1000/fps)return;
     lastFrame=time;
@@ -431,6 +451,7 @@
   window.__spider3dControls={
     modes:MODES,quality:()=>quality,
     presets:()=>presetBank.list(),applyPreset,
+    autoScenes:()=>autoScenes,
     diagnostics:()=>Object.freeze({mode:window.__spiderVisualizerSnapshot?.().mode||'unknown',
       quality,theme:settings.theme,motion:settings.motion,
       resolution:canvas?{width:canvas.width,height:canvas.height}:null,

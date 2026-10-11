@@ -77,5 +77,20 @@
     failure(){this.errors=Math.min(9999,this.errors+1);}
     snapshot(){return Object.freeze({fps:this.fps,frames:this.count,skipped:this.skipped,errors:this.errors,maxGapMs:Math.round(this.maxGap)});}
   }
-  return Object.freeze({BUILT_INS,MAX_CUSTOM,cleanPreset,readCustom,PresetBank,FrameHealth});
+  class SceneRotation{
+    constructor(intervalMs=90000){this.intervalMs=Math.max(30000,Math.min(300000,Number(intervalMs)||90000));this.reset();}
+    reset(){this.lastAt=0;this.index=-1;}
+    tick(now,active,presets=BUILT_INS){
+      if(!active||!Number.isFinite(now)||!Array.isArray(presets)||!presets.length){
+        this.lastAt=0;return null;
+      }
+      if(!this.lastAt){this.lastAt=now;return null;}
+      if(now<this.lastAt){this.lastAt=now;return null;}
+      if(now-this.lastAt<this.intervalMs)return null;
+      this.lastAt=now;
+      this.index=(this.index+1)%presets.length;
+      return presets[this.index];
+    }
+  }
+  return Object.freeze({BUILT_INS,MAX_CUSTOM,cleanPreset,readCustom,PresetBank,FrameHealth,SceneRotation});
 });

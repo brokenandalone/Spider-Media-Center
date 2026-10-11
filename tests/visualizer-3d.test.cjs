@@ -8,6 +8,7 @@ const root=path.join(__dirname,'..');
 const visual=fs.readFileSync(path.join(root,'dist/visualizer-3d.js'),'utf8');
 const shaders=fs.readFileSync(path.join(root,'dist/visualizer-3d-shaders.js'),'utf8');
 const performanceSource=fs.readFileSync(path.join(root,'dist/visualizer-performance.js'),'utf8');
+const presetSource=fs.readFileSync(path.join(root,'dist/visualizer-presets.js'),'utf8');
 
 function harness(webgl=true){
   let current='3d-tunnel';
@@ -64,6 +65,7 @@ function harness(webgl=true){
   };
   vm.runInNewContext(shaders,context);
   vm.runInNewContext(performanceSource,context);
+  vm.runInNewContext(presetSource,context);
   vm.runInNewContext(visual,context);
   const frame=t=>{const callback=frames.shift();assert.ok(callback,'expected scheduled frame');callback(t);};
   return {stage,window,document,events,frames,draws,gl,frame,get mode(){return current;},listener:listeners};
@@ -97,7 +99,8 @@ test('GPU quality and 3D mode are controlled from accessible on-stage selectors'
   const h=harness();
   h.frame(100);
   const controls=h.stage.children.find(e=>e.id==='spider3dControls');
-  const [mode,quality]=controls.children;
+  const mode=controls.children.find(e=>e.attributes['aria-label']==='Visualizer style');
+  const quality=controls.children.find(e=>e.attributes['aria-label']==='GPU visualizer quality');
   assert.equal(mode.attributes['aria-label'],'Visualizer style');
   assert.equal(quality.attributes['aria-label'],'GPU visualizer quality');
   mode.value='3d-broken-city';
@@ -151,10 +154,12 @@ test('React, classic player, renderer engine and release packager include all 3D
   assert.match(react,/visualizer-3d-shaders\.js/);
   assert.match(react,/visualizer-3d\.js/);
   assert.match(react,/visualizer-performance\.js/);
+  assert.match(react,/visualizer-presets\.js/);
   assert.match(classic,/visualizer-3d\.js/);
   assert.match(packager,/'dist\/visualizer-3d\.js'/);
   assert.match(packager,/'dist\/visualizer-3d-shaders\.js'/);
   assert.match(packager,/'dist\/visualizer-performance\.js'/);
+  assert.match(packager,/'dist\/visualizer-presets\.js'/);
   assert.match(installer,/SOURCE_COMMIT='c8f95f74ecc93eb858801eb2025af8f151e5116e'/);
   assert.match(installer,/CI_RUN_ID='38127241699'/);
 });
@@ -197,7 +202,13 @@ test('visualizer color, motion and performance HUD are adjustable without replac
   const h=harness();
   h.frame(100);
   const controls=h.stage.children.find(e=>e.id==='spider3dControls');
-  const [mode,quality,theme,motion,adaptiveButton,statsButton,resetButton,theaterButton,stats]=controls.children;
+  const get=label=>controls.children.find(e=>e.attributes['aria-label']===label);
+  const theme=get('3D visualizer color theme');
+  const motion=get('3D visualizer motion');
+  const adaptiveButton=get('Toggle automatic 3D resolution scaling');
+  const statsButton=get('Toggle 3D performance statistics');
+  const resetButton=get('Reset 3D visualizer preferences');
+  const stats=get('3D performance diagnostics');
   assert.equal(theme.attributes['aria-label'],'3D visualizer color theme');
   assert.equal(motion.attributes['aria-label'],'3D visualizer motion');
   theme.value='crimson';theme.events.change();
@@ -315,4 +326,24 @@ test('starting a movie during fullscreen cinema exits without stopping playback'
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(h.document.fullscreenElement,null);
   assert.equal(h.stage.children.find(e=>e.id==='spider3dCanvas').style.display,'none');
+});
+
+test('cinematic presets switch scene, theme and GPU profile together',()=>{
+  const h=harness();
+  h.frame(100);
+  const controls=h.stage.children.find(e=>e.id==='spider3dControls');
+  const get=label=>controls.children.find(e=>e.attributes['aria-label']===label);
+  const preset=get('Cinematic visualizer scene presets');
+  assert.ok(preset);
+  assert.equal(h.window.__spider3dControls.presets().length,8);
+  preset.value='broken-city';preset.events.change();
+  assert.equal(h.mode,'3d-broken-city');
+  const diagnostic=h.window.__spider3dControls.diagnostics();
+  assert.equal(diagnostic.theme,'crimson');
+  assert.equal(diagnostic.quality,'ultra');
+  assert.equal(diagnostic.motion,'calm');
+  get('Save current visualizer settings as a custom scene').events.click();
+  assert.equal(h.window.__spider3dControls.presets().length,9);
+  get('Delete selected custom visualizer scene').events.click();
+  assert.equal(h.window.__spider3dControls.presets().length,8);
 });

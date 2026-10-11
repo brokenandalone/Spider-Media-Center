@@ -8,8 +8,14 @@
   const KEY='spider.visualizer.3d.settings';
   const legacyKey='spider.visualizer.3d.quality';
   const governor=new performanceKit.AdaptiveGovernor();
+  const presetKit=window.SpiderVisualizerPresets;
+  const PRESET_KEY='spider.visualizer.3d.custom-presets';
+  let presetBank=new presetKit.PresetBank();
+  const frameHealth=new presetKit.FrameHealth();
+  const sceneRotation=new presetKit.SceneRotation(90000);
+  let autoScenes=false;
   let stage=null,canvas=null,controls=null,selector=null,qualitySelect=null,status=null;
-  let themeSelect=null,motionSelect=null,statsButton=null,stats=null,adaptiveButton=null,resetButton=null,theaterButton=null;
+  let themeSelect=null,motionSelect=null,statsButton=null,stats=null,adaptiveButton=null,resetButton=null,theaterButton=null,presetSelect=null,savePresetButton=null,deletePresetButton=null,autoScenesButton=null;
   let oldCanvas=null,oldCanvasVisibility=null;
   let settings=performanceKit.sanitize();
   let gpu=null,unavailable=false,contextLost=false,lastFrame=0,modeShown='';
@@ -118,6 +124,32 @@
       theaterButton.setAttribute('aria-pressed',String(cinemaActive()));
     }
   }
+  function persistPresets(){
+    try{localStorage.setItem(PRESET_KEY,presetBank.serialize())}catch{}
+  }
+  function refreshPresets(selected=''){
+    if(!presetSelect)return;
+    while(presetSelect.firstChild)presetSelect.removeChild(presetSelect.firstChild);
+    // This select is never fed HTML. Labels are textContent only.
+    const placeholder=document.createElement('option');
+    placeholder.value='';placeholder.textContent='SCENE PRESETS';
+    presetSelect.append(placeholder);
+    for(const preset of presetBank.list()){
+      const option=document.createElement('option');
+      option.value=preset.id;option.textContent=preset.name;
+      presetSelect.append(option);
+    }
+    presetSelect.value=selected;
+  }
+  function applyPreset(id){
+    const preset=presetBank.find(id);
+    if(!preset)return false;
+    selectQuality(preset.quality);selectTheme(preset.theme);selectMotion(preset.motion);
+    if(themeSelect)themeSelect.value=settings.theme;
+    if(motionSelect)motionSelect.value=settings.motion;
+    switchMode(preset.mode);
+    return true;
+  }
   function makeControls(parent){
     controls=document.createElement('div');
     controls.id='spider3dControls';
@@ -132,6 +164,36 @@
       option.value=value;option.textContent=label;selector.append(option);
     }
     selector.addEventListener('change',()=>switchMode(selector.value));
+    presetSelect=document.createElement('select');
+    presetSelect.setAttribute('aria-label','Cinematic visualizer scene presets');
+    presetSelect.addEventListener('change',()=>applyPreset(presetSelect.value));
+    refreshPresets();
+    autoScenesButton=document.createElement('button');
+    autoScenesButton.type='button';
+    autoScenesButton.setAttribute('aria-label','Toggle automatic cinematic scene rotation');
+    const syncAutoScenes=()=>{autoScenesButton.textContent=autoScenes?'AUTO SCENES ON':'AUTO SCENES OFF';};
+    autoScenesButton.addEventListener('click',()=>{
+      autoScenes=!autoScenes;
+      sceneRotation.reset();
+      syncAutoScenes();
+    });
+    syncAutoScenes();
+    savePresetButton=document.createElement('button');
+    savePresetButton.type='button';savePresetButton.textContent='SAVE SCENE';
+    savePresetButton.setAttribute('aria-label','Save current visualizer settings as a custom scene');
+    savePresetButton.addEventListener('click',()=>{
+      const mode=window.__spiderVisualizerSnapshot?.().mode;
+      const name='MY SCENE '+(presetBank.custom.length+1);
+      const saved=presetBank.save({name,mode,quality,theme:settings.theme,motion:settings.motion});
+      if(saved){persistPresets();refreshPresets(saved.id);}
+      else window.dispatchEvent(new CustomEvent('spider:notice',{detail:{message:'Custom scene limit reached (12) or scene unavailable'}}));
+    });
+    deletePresetButton=document.createElement('button');
+    deletePresetButton.type='button';deletePresetButton.textContent='DELETE SCENE';
+    deletePresetButton.setAttribute('aria-label','Delete selected custom visualizer scene');
+    deletePresetButton.addEventListener('click',()=>{
+      if(presetBank.delete(presetSelect.value)){persistPresets();refreshPresets();}
+    });
     qualitySelect=document.createElement('select');
     qualitySelect.setAttribute('aria-label','GPU visualizer quality');
     for(const name of ['eco','balanced','ultra']){
@@ -191,10 +253,10 @@
     status.setAttribute('role','status');
     status.textContent='3D ready';
     status.style.cssText='font:10px system-ui;color:#d8b5ff;text-shadow:0 1px 2px black';
-    for(const input of [selector,qualitySelect,themeSelect,motionSelect,adaptiveButton,statsButton,resetButton,theaterButton]){
+    for(const input of [selector,presetSelect,autoScenesButton,savePresetButton,deletePresetButton,qualitySelect,themeSelect,motionSelect,adaptiveButton,statsButton,resetButton,theaterButton]){
       input.style.cssText='color:#f2d9ff;background:#180d25;border:1px solid #9851c4;border-radius:7px;font:11px system-ui;padding:6px;max-width:170px';
     }
-    controls.append(selector,qualitySelect,themeSelect,motionSelect,adaptiveButton,statsButton,resetButton,theaterButton,stats,status);
+    controls.append(selector,presetSelect,autoScenesButton,savePresetButton,deletePresetButton,qualitySelect,themeSelect,motionSelect,adaptiveButton,statsButton,resetButton,theaterButton,stats,status);
     // The React player already supplies a fullscreen control. The classic
     // player gets the same affordance without modifying its legacy layout.
     if (!parent.querySelector?.('.visualizer-fullscreen')) {
@@ -309,6 +371,10 @@
       selector.value=is3d?snapshot.mode:'web';
       modeShown=snapshot.mode;
     }
+    presetSelect.hidden=!is3d;
+    autoScenesButton.hidden=!is3d;
+    savePresetButton.hidden=!is3d;
+    deletePresetButton.hidden=!is3d;
     qualitySelect.hidden=!is3d;
     themeSelect.hidden=!is3d;
     motionSelect.hidden=!is3d;
@@ -318,7 +384,14 @@
     statsButton.hidden=!is3d;
     stats.hidden=!is3d||!settings.showStats;
     status.hidden=!is3d;
-    if(!visible||document.hidden||unavailable||contextLost)return;
+    if(!visible||document.hidden||unavailable||contextLost){
+      sceneRotation.reset();
+      return;
+    }
+    if(autoScenes){
+      const next=sceneRotation.tick(time,snapshot.playing,presetBank.list());
+      if(next){applyPreset(next.id);return;}
+    }
     const fps=snapshot.lightweight?Math.min(QUALITY[quality].fps,15):QUALITY[quality].fps;
     if(time-lastFrame<1000/fps)return;
     lastFrame=time;
@@ -330,14 +403,16 @@
     try{
       const started=window.performance?.now?.()??time;
       draw(time,audioSnapshot,bounds);
+      frameHealth.tick(time,true);
       const elapsed=Math.max(0,(window.performance?.now?.()??started)-started);
       governor.record(elapsed,fps,settings.adaptive && !snapshot.lightweight);
       if(stats && settings.showStats){
         const report=governor.snapshot();
-        stats.textContent=canvas.width+'×'+canvas.height+' · '+fps+' FPS cap · render '+Math.round(report.scale*100)+'% · '+report.p75Ms.toFixed(1)+'ms submit p75';
+        stats.textContent=canvas.width+'×'+canvas.height+' · '+fps+' FPS cap · render '+Math.round(report.scale*100)+'% · '+report.p75Ms.toFixed(1)+'ms submit p75 · '+frameHealth.snapshot().fps+' measured FPS';
       }
     }
     catch(error){
+      frameHealth.failure();
       unavailable=true;dispose();switchMode('web');
       if(status)status.textContent='GPU unsupported · 2D fallback';
       console.warn('Spider visualizer 3D fallback:',error.message);
@@ -371,13 +446,17 @@
   cinemaStyle.id='spider3dCinemaStyle';
   cinemaStyle.textContent='#mediaStage:fullscreen{width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;background:#06020c!important;overflow:hidden!important}#mediaStage:fullscreen #spider3dCanvas{width:100%!important;height:100%!important}#mediaStage:fullscreen #spider3dControls{z-index:999!important;max-width:calc(100% - 32px)!important}';
   (document.head||document.documentElement)?.append(cinemaStyle);
+  try{presetBank=new presetKit.PresetBank(presetKit.readCustom(localStorage.getItem(PRESET_KEY)))}catch{}
   window.requestAnimationFrame(loop);
   window.__spider3dControls={
     modes:MODES,quality:()=>quality,
+    presets:()=>presetBank.list(),applyPreset,
+    autoScenes:()=>autoScenes,
     diagnostics:()=>Object.freeze({mode:window.__spiderVisualizerSnapshot?.().mode||'unknown',
       quality,theme:settings.theme,motion:settings.motion,
       resolution:canvas?{width:canvas.width,height:canvas.height}:null,
-      governor:governor.snapshot(),webglActive:!!gpu,contextLost,cinema:cinemaActive()}),
+      governor:governor.snapshot(),health:frameHealth.snapshot(),presets:presetBank.list().length,
+      webglActive:!!gpu,contextLost,cinema:cinemaActive()}),
     reset:()=>{
       settings=performanceKit.sanitize();
       selectQuality('balanced');selectTheme('purple');selectMotion('full');

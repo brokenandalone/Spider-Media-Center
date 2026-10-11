@@ -1,3 +1,21 @@
+## Massive visualizer scene-bank upgrade (V7 candidate)
+
+The fullscreen 3D engine now includes **eight bundled cinematic scene presets**:
+Neon Tunnel, BCN Broadcast, Broken City, Deep Forage, Emerald Orbit,
+Golden Hour, Low Power and Midnight Radio. A preset switches the 3D
+scene, color palette, GPU quality and motion setting together. SAVE SCENE
+stores up to twelve custom local presets; DELETE SCENE removes only a
+selected custom preset, never a bundled scene. Stored names and values
+are sanitized and size-limited; no audio files, media paths or user
+content are uploaded. AUTO SCENES optionally rotates through the scene bank every 90 seconds during active music playback, pauses for hidden windows and video, and requires no timers or background network service. The diagnostics API reports measured draw-frame
+FPS, render resolution, frame counts and GPU initialization failures,
+not merely the selected FPS cap. The existing V6 installer remains
+pinned and unchanged.
+
+**Important:** this is a candidate feature, not an installed Spider OS
+release. Validate real GPU performance, persistence and radio/video
+transitions on the PC before promoting a new installer.
+
 # Spider Media Center
 
 Spider Media Center is the standalone media and broadcast application for Spider OS.

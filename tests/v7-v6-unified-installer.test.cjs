@@ -33,3 +33,15 @@ test('release checksum manifest and CI include combined installer',()=>{
  const check=spawnSync('bash',['-n',path.join(root,'scripts/install-v7-with-v6-nova.sh')],{encoding:'utf8'});
  assert.equal(check.status,0,check.stderr);
 });
+
+test('Nova recovery exposes read-only diagnostics and avoids proxying loopback',()=>{
+ assert.match(combined,/--diagnose/);
+ assert.match(combined,/ProxyHandler\(\{\}\)/);
+ assert.match(combined,/journalctl --user -u spider-ai-dj\.service -n 35/);
+ assert.match(combined,/UNIT_COMMAND/);
+ assert.match(combined,/health\.get\('host'\)=='Nova'/);
+ assert.match(combined,/sudo cmp -s -- "\$MEDIA_BACKUP" "\$MEDIA_TARGET"/);
+ assert.match(combined,/Rollback files verified byte-for-byte/);
+ assert.match(combined,/WARNING: Rollback requires manual inspection/);
+ assert.match(combined,/for attempt in range\(16\)/);
+});

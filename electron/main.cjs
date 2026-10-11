@@ -25,10 +25,12 @@ const { MediaCompatibility } = require('./media-compatibility.cjs');
 const { nativeNova } = require('./nova-service.cjs');
 const nova = nativeNova();
 const { BcnDesk } = require('./bcn-desk.cjs');
+const { NovaPrepareQueue } = require('./bcn-prepare-queue.cjs');
 const { BcnListenerIntake } = require('./bcn-listener-intake.cjs');
 const { RadioTelemetry } = require('./radio-telemetry.cjs');
 const { RadioRecoveryState, safeProfile } = require('./radio-recovery.cjs');
 const { PublicRelayWatch } = require('./radio-relay-probe.cjs');
+const novaPrepareQueue = new NovaPrepareQueue(8);
 let bcnDesk;
 function programmingDesk() {
   return bcnDesk ||= new BcnDesk({ file: path.join(app.getPath('userData'), 'bcn-desk.json') });
@@ -1275,16 +1277,20 @@ ipcMain.handle('bcn:desk-review-request', (event, id, approved) => {
   trustedMediaSender(event);
   return programmingDesk().reviewRequest(id, approved === true);
 });
-ipcMain.handle('nova:prepare', async (event, payload) => {
+ipcMain.handle('nova:prepare', (event, payload) => {
   trustedMediaSender(event);
-  const control = programmingDesk();
-  const planned = control.planBreak(payload);
-  const prepared = await nova.prepare(planned.payload);
-  if (!control.stillApproved(planned)) {
-    throw new Error('A BCN request was withdrawn before Nova prepared it');
-  }
-  control.commitBreak(planned);
-  return prepared;
+  return novaPrepareQueue.enqueue(async () => {
+    // Plan only when this request gets its turn. Planning before the async
+    // wait can select the same unconsumed approval for multiple breaks.
+    const control = programmingDesk();
+    const planned = control.planBreak(payload);
+    const prepared = await nova.prepare(planned.payload);
+    if (!control.stillApproved(planned)) {
+      throw new Error('A BCN request was withdrawn before Nova prepared it');
+    }
+    control.commitBreak(planned);
+    return prepared;
+  });
 });
 
 ipcMain.handle('media:prepare-compatibility', async (event, url) => {

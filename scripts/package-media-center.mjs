@@ -7,6 +7,8 @@ import { execFileSync } from 'node:child_process';
 import { createPackage, extractFile, listPackage } from '@electron/asar';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const packageInfo = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+const releaseVersion = packageInfo.version || '1.0.0';
 const output = path.resolve(process.argv[2] || path.join(root, 'release'));
 const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'spider-media-build-'));
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
@@ -50,7 +52,17 @@ try {
   if (revision === 'unknown') {
     try { revision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(); } catch {}
   }
-  fs.writeFileSync(path.join(output, 'build.json'), JSON.stringify({ version: '1.0.0', sourceRevision: revision, node: process.version, archiveSha256: hash(fs.readFileSync(archive)), archiveEntries: entries.length, installedPlaybackVerified: false }, null, 2) + '\n');
+  fs.writeFileSync(path.join(output, 'build.json'), JSON.stringify({
+    productName: packageInfo.name,
+    displayName: 'Spider Media Center',
+    version: releaseVersion,
+    compatibilityBaseline: 'V5.0',
+    sourceRevision: revision,
+    node: process.version,
+    archiveSha256: hash(fs.readFileSync(archive)),
+    archiveEntries: entries.length,
+    installedPlaybackVerified: false
+  }, null, 2) + '\n');
   const deliverables = ['app.asar', 'install-media-center.sh', 'README.md', 'build.json'];
   fs.writeFileSync(path.join(output, 'SHA256SUMS'), deliverables.map(n => hash(fs.readFileSync(path.join(output, n))) + '  ' + n + '\n').join(''));
   console.log(`Verified Media Center ASAR (${entries.length} entries): ${archive}`);

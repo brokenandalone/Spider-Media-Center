@@ -48,7 +48,6 @@ prepared DJ transition. Show context and any explicitly approved requests are
 sent through the existing secure Electron bridge. This does not yet establish
 a completed live listener-request UI or a 24/7 broadcast scheduler.
 
-
 This is an application archive upgrade for the existing **Spider Media Center**
 installation at `/opt/spider-media-center`. It preserves the compiled Kabel 7.5
 interface, the existing Electron runtime, application settings, libraries and

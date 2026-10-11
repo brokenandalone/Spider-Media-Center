@@ -44,11 +44,11 @@
     }catch{return [];}
   }
   class PresetBank{
-    constructor(custom=[]){this.custom=readCustom(JSON.stringify(custom));}
+    constructor(custom=[]){this.custom=readCustom(JSON.stringify(custom));this.nextId=this.custom.length;}
     list(){return [...BUILT_INS,...this.custom];}
     find(id){return this.list().find(p=>p.id===id)||null;}
     save(raw){
-      const preset=cleanPreset(raw,'user-'+Date.now().toString(36));
+      const preset=cleanPreset(raw,'user-'+(this.nextId++).toString(36)+'-'+Date.now().toString(36));
       if(!preset)return null;
       if(this.custom.length>=MAX_CUSTOM)return null;
       this.custom.push(preset);

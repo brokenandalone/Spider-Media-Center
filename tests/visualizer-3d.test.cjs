@@ -268,3 +268,16 @@ test('cinema is not activated in 2D mode or by a hidden media stage',async()=>{
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(entered,0);
 });
+
+test('cinema refuses fullscreen while video is occupying the media stage',async()=>{
+  const h=harness();
+  let entered=0;
+  h.stage.requestFullscreen=async()=>{entered++;};
+  h.window.__spiderVisualizerSnapshot=()=>({mode:'3d-tunnel',isVideo:true,playing:true,lightweight:false,bands:new Uint8Array(1024)});
+  h.frame(100);
+  const cinema=h.stage.children.find(e=>e.id==='spider3dControls').children.find(e=>e.attributes['aria-label']==='Toggle immersive fullscreen 3D cinema');
+  assert.equal(cinema.hidden,true);
+  cinema.events.click();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(entered,0);
+});

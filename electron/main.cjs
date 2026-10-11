@@ -28,6 +28,7 @@ const { BcnDesk } = require('./bcn-desk.cjs');
 const { NovaPrepareQueue } = require('./bcn-prepare-queue.cjs');
 const { BcnListenerIntake } = require('./bcn-listener-intake.cjs');
 const { RadioTelemetry } = require('./radio-telemetry.cjs');
+const { closeRadioHttpServer } = require('./radio-http-shutdown.cjs');
 const { RadioRecoveryState, safeProfile } = require('./radio-recovery.cjs');
 const { PublicRelayWatch } = require('./radio-relay-probe.cjs');
 const novaPrepareQueue = new NovaPrepareQueue(8);
@@ -1078,8 +1079,10 @@ async function stopRadioServer() {
   }
   if (radioServer) {
     const server = radioServer;
-    radioServer = undefined;
-    await new Promise((resolve) => server.close(resolve));
+    // A mobile stream can keep the response open indefinitely. Drain first,
+    // then terminate only this radio server's remaining sockets if needed.
+    await closeRadioHttpServer(server);
+    if (radioServer === server) radioServer = undefined;
   }
   radioState = { active: false, listenerCount: 0 };
   sendRadioEvent({ type: 'stopped' });

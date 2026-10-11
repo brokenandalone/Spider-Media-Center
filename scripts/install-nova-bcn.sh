@@ -103,7 +103,7 @@ printf 'Release files retained in: %s\n' "$SAVED"
 echo 'Installing verified Media Center and upgrading the EXISTING Spider OS Nova service.'
 # Native DJ validation happens after Media Center installation; preserve a
 # paired archive snapshot so a failed Python upgrade can undo BOTH changes.
-ASAR_BACKUP="$TARGET.before-bcn-pair-$(date +%Y%m%d-%H%M%S)-$"
+ASAR_BACKUP="$TARGET.before-bcn-pair-$(date +%Y%m%d-%H%M%S)-$$"
 sudo cp -a -- "$TARGET" "$ASAR_BACKUP" ||
   fail "Could not back up the existing Media Center archive; nothing was upgraded."
 restore_media_center() {
@@ -116,7 +116,7 @@ if ! sudo bash "$SAVED/install-media-center.sh"; then
   fail 'Media Center installation failed; the original archive was restored.'
 fi
 
-NOVA_BACKUP="$NOVA_TARGET/service.py.before-bcn-$(date +%Y%m%d-%H%M%S)-$"
+NOVA_BACKUP="$NOVA_TARGET/service.py.before-bcn-$(date +%Y%m%d-%H%M%S)-$$"
 if ! sudo cp -a -- "$NOVA_TARGET/service.py" "$NOVA_BACKUP"; then
   restore_media_center
   fail 'Could not back up the native Nova service; Media Center has been restored.'

@@ -39,6 +39,31 @@ The current repository includes the working Media Center baseline plus the Linux
 - Linux media keys
 - Local Linux speech fallback through espeak-ng
 
+## V7 development preview: true 3D audio visualizer
+
+The next upgrade round introduces a **real offline WebGL shader visualizer**,
+not another flat 2D preset. Four perspective-rendered, ray-marched GPU scenes
+respond to the existing Media Center audio FFT:
+**3D Tunnel**, **3D Spectrum**, **3D Orbit**, and **3D Broken City**.
+
+The 3D controls live at the upper left of the visualizer stage in both
+React and classic players, with a direct style selector and Eco / Balanced /
+Ultra GPU quality. **Shift+V** cycles the four 3D modes when focus is not
+inside an input. The React fullscreen button remains available; the
+classic player gains a fullscreen button. Audio and video playback continue
+through the existing Web Audio mixer; there is no added DJ service, new
+microphone permission, remote network dependency or media upload.
+
+3D stops rendering behind video and when the app window is hidden. Eco
+mode and lightweight mode reduce GPU work. The rendering resolution is
+limited to about 720p worth of pixels, even on high-DPI displays. On
+WebGL loss or unsupported hardware it switches back to the normal 2D
+visualizer instead of stopping playback.
+
+This development preview is **not part of the existing V6 installer**.
+That verified release remains pinned on main for installation separately.
+No actual PC GPU compatibility claim is made until tested on Spider OS.
+
 ## V6 public relay health monitor
 
 V6 adds a functional **BCN public relay reachability watch** to the

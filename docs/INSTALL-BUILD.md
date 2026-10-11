@@ -1,3 +1,29 @@
+# Unified V7 + V6 Nova installation
+
+A single release artifact now includes `install-v7-with-v6-nova.sh`.
+This installs **V7 Media Center** and refreshes the **existing V6 Nova
+service** from pinned Spider OS commit `980fccf98e4dfdfdb27b32a49c46158ca752a79c`.
+The V6 playback, BCN, scheduling and request features remain in V7.
+This does not install a separate DJ daemon, nor alter Spider OS itself.
+
+Extract the GitHub Actions **Spider-Media-Center-Playback-Build**
+artifact, close Media Center, then run as your **normal desktop user**:
+
+```bash
+bash install-v7-preview.sh --check
+bash install-v7-with-v6-nova.sh --install
+```
+
+The combined installer requests sudo when required, verifies the V7
+archive and native Nova source, creates paired backups, installs the V7
+archive, updates the existing Nova files, restarts the single Nova
+user service, and checks the local Nova health response. On postinstall
+failure, it attempts to restore both components.
+
+**Important:** this is a V7 preview whose physical GPU, playback,
+and public BCN audio tests remain outstanding. The original V6
+`install-nova-bcn.sh` is still pinned and unchanged.
+
 # V7 isolated preview build (not yet hardware validated)
 
 This release bundle now contains **install-v7-preview.sh**, an opt-in

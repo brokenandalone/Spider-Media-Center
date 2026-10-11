@@ -40,6 +40,7 @@ jobs:
           bash -n scripts/install-nova-bcn.sh
           bash -n scripts/install-media-center.sh
           bash -n scripts/install-v7-preview.sh
+          bash -n scripts/install-v7-with-v6-nova.sh
       - name: Install fixture decoder
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Playback and compatibility regressions

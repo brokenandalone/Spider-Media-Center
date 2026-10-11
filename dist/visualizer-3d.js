@@ -97,7 +97,8 @@
     return !!(stage && document.fullscreenElement===stage);
   }
   async function toggleCinema(){
-    if(!stage || !window.__spiderVisualizerSnapshot?.().mode?.startsWith('3d-'))return;
+    const snapshot=window.__spiderVisualizerSnapshot?.();
+    if(!stage || !snapshot?.mode?.startsWith('3d-') || snapshot.isVideo)return;
     try{
       if(cinemaActive())await document.exitFullscreen();
       else if(document.fullscreenElement) {
@@ -307,7 +308,7 @@
     motionSelect.hidden=!is3d;
     adaptiveButton.hidden=!is3d;
     resetButton.hidden=!is3d;
-    theaterButton.hidden=!is3d;
+    theaterButton.hidden=!visible;
     statsButton.hidden=!is3d;
     stats.hidden=!is3d||!settings.showStats;
     status.hidden=!is3d;

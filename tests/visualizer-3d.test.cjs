@@ -7,6 +7,7 @@ const vm=require('node:vm');
 const root=path.join(__dirname,'..');
 const visual=fs.readFileSync(path.join(root,'dist/visualizer-3d.js'),'utf8');
 const shaders=fs.readFileSync(path.join(root,'dist/visualizer-3d-shaders.js'),'utf8');
+const performanceSource=fs.readFileSync(path.join(root,'dist/visualizer-performance.js'),'utf8');
 
 function harness(webgl=true){
   let current='3d-tunnel';
@@ -38,7 +39,7 @@ function harness(webgl=true){
     texParameteri(){},texImage2D(){},getUniformLocation(_p,n){return n;},
     texSubImage2D(){},viewport(){},useProgram(){},enableVertexAttribArray(){},
     vertexAttribPointer(){},activeTexture(){},uniform1i(){},uniform2f(){},
-    uniform1f(){},drawArrays(...args){draws.push(args);},deleteTexture(){},deleteBuffer(){}
+    uniform1f(){},uniform3f(){},drawArrays(...args){draws.push(args);},deleteTexture(){},deleteBuffer(){}
   };
   const stage=element('div');stage.id='mediaStage';
   const document={
@@ -62,6 +63,7 @@ function harness(webgl=true){
     Float32Array,Uint8Array,console,Math
   };
   vm.runInNewContext(shaders,context);
+  vm.runInNewContext(performanceSource,context);
   vm.runInNewContext(visual,context);
   const frame=t=>{const callback=frames.shift();assert.ok(callback,'expected scheduled frame');callback(t);};
   return {stage,window,document,events,frames,draws,gl,frame,get mode(){return current;},listener:listeners};
@@ -148,9 +150,11 @@ test('React, classic player, renderer engine and release packager include all 3D
   assert.match(bridge,/setVisualizerMode\(mode\)/);
   assert.match(react,/visualizer-3d-shaders\.js/);
   assert.match(react,/visualizer-3d\.js/);
+  assert.match(react,/visualizer-performance\.js/);
   assert.match(classic,/visualizer-3d\.js/);
   assert.match(packager,/'dist\/visualizer-3d\.js'/);
   assert.match(packager,/'dist\/visualizer-3d-shaders\.js'/);
+  assert.match(packager,/'dist\/visualizer-performance\.js'/);
   assert.match(installer,/SOURCE_COMMIT='c8f95f74ecc93eb858801eb2025af8f151e5116e'/);
   assert.match(installer,/CI_RUN_ID='38127241699'/);
 });
@@ -187,4 +191,38 @@ test('new 3D FFT snapshot reads both live decks without a second AudioContext',(
   state.visualizerMode='web';
   assert.equal(window.__spiderVisualizerSnapshot().bands,null);
   assert.equal(reads,3);
+});
+
+test('visualizer color, motion and performance HUD are adjustable without replacing audio',()=>{
+  const h=harness();
+  h.frame(100);
+  const controls=h.stage.children.find(e=>e.id==='spider3dControls');
+  const [mode,quality,theme,motion,statsButton,stats]=controls.children;
+  assert.equal(theme.attributes['aria-label'],'3D visualizer color theme');
+  assert.equal(motion.attributes['aria-label'],'3D visualizer motion');
+  theme.value='crimson';theme.events.change();
+  motion.value='still';motion.events.change();
+  statsButton.events.click();
+  h.frame(200);
+  const report=h.window.__spider3dControls.diagnostics();
+  assert.equal(report.theme,'crimson');
+  assert.equal(report.motion,'still');
+  assert.equal(stats.hidden,false);
+  assert.match(stats.textContent,/FPS cap/);
+  h.window.__spider3dControls.reset();
+  assert.equal(h.window.__spider3dControls.diagnostics().theme,'purple');
+});
+
+test('3D layer restores legacy 2D canvas visibility on switching modes',()=>{
+  const h=harness();
+  const classic={
+    style:{visibility:'visible'},
+    isConnected:true
+  };
+  h.stage.querySelector=selector=>selector==='#visualizerCanvas'?classic:null;
+  h.frame(100);
+  assert.equal(classic.style.visibility,'hidden');
+  h.window.__spiderPlayerEngine.setVisualizerMode('web');
+  h.frame(200);
+  assert.equal(classic.style.visibility,'visible');
 });

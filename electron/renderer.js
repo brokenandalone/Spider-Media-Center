@@ -207,15 +207,28 @@ const state = {
   transfers: new Map()
 };
 
-// The WebGL visualizer borrows the existing mixer analyser data. It never
-// creates a second AudioContext or copies private media paths to the DOM.
+// The WebGL visualizer borrows the existing mixer analyser nodes, without
+// a second AudioContext or any private media path/URL in the GPU payload.
+// The legacy 2D renderer intentionally skips FFT work in a 3D mode, so
+// refresh these buffers here. Blend both decks during active crossfades.
+const visualizer3dBands = new Uint8Array(1024);
 window.__spiderVisualizerSnapshot = () => {
-  const graph = state.audioGraphs[state.activeDeck];
-  const deck = activeMedia();
+  const mode = state.visualizerMode;
+  const threeD = mode.startsWith('3d-');
+  const active = state.audioGraphs.filter(graph => graph?.deck && !graph.deck.paused);
+  if (threeD) {
+    visualizer3dBands.fill(0);
+    for (const graph of active) {
+      graph.analyser.getByteFrequencyData(graph.frequencyData);
+      for (let i = 0; i < visualizer3dBands.length && i < graph.frequencyData.length; i++) {
+        visualizer3dBands[i] = Math.max(visualizer3dBands[i], graph.frequencyData[i]);
+      }
+    }
+  }
   return {
-    mode: state.visualizerMode,
-    playing: Boolean(graph && deck && !deck.paused),
-    bands: graph?.frequencyData || null,
+    mode,
+    playing: active.length > 0,
+    bands: threeD ? visualizer3dBands : null,
     lightweight: state.lightweightMode,
     isVideo: isVideoItem(currentItem())
   };

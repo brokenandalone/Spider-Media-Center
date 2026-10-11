@@ -47,6 +47,7 @@ try {
   }
   if (entries.some(n => n.includes('.before-') || n.includes('/@electron/asar/'))) throw new Error('Development files entered the archive.');
   fs.copyFileSync(path.join(root, 'scripts/install-media-center.sh'), path.join(output, 'install-media-center.sh'));
+  fs.copyFileSync(path.join(root, 'scripts/install-v7-preview.sh'), path.join(output, 'install-v7-preview.sh'));
   fs.copyFileSync(path.join(root, 'docs/INSTALL-BUILD.md'), path.join(output, 'README.md'));
   let revision = process.env.SPIDER_BUILD_REVISION || process.env.GITHUB_SHA || 'unknown';
   if (revision === 'unknown') {
@@ -56,9 +57,9 @@ try {
     productName: packageInfo.name,
     displayName: 'Spider Media Center',
     version: releaseVersion,
-    compatibilityBaseline: 'V5.0',
+    compatibilityBaseline: 'V6.0',
     majorUpgrade: true,
-    releaseTrack: 'major-upgrade',
+    releaseTrack: 'v7-preview',
     featureHighlights: [
       'radio recovery and relay restoration',
       'listener verification and delivery health monitoring',
@@ -67,7 +68,10 @@ try {
       'AutoDJ continuity guard and show scheduling controls',
       'Nova voice integration and approved request handling',
       'Linux media-key and cloudflared integration',
-      'repeatable installer and rollback packaging'
+      'repeatable installer and rollback packaging',
+      'V7 WebGL visualizer with eight cinematic presets and 12 custom slots',
+      'optional auto-scene rotation, cinema fullscreen and adaptive GPU diagnostics',
+      'separate opt-in preview installer preserving V6 and native Nova'
     ],
     sourceRevision: revision,
     node: process.version,
@@ -75,7 +79,7 @@ try {
     archiveEntries: entries.length,
     installedPlaybackVerified: false
   }, null, 2) + '\n');
-  const deliverables = ['app.asar', 'install-media-center.sh', 'README.md', 'build.json'];
+  const deliverables = ['app.asar', 'install-media-center.sh', 'install-v7-preview.sh', 'README.md', 'build.json'];
   fs.writeFileSync(path.join(output, 'SHA256SUMS'), deliverables.map(n => hash(fs.readFileSync(path.join(output, n))) + '  ' + n + '\n').join(''));
   console.log(`Verified Media Center ASAR (${entries.length} entries): ${archive}`);
 } finally { fs.rmSync(stage, { recursive: true, force: true }); }

@@ -1,0 +1,40 @@
+'use strict';
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const {spawnSync}=require('node:child_process');
+const root=path.join(__dirname,'..');
+const script=fs.readFileSync(path.join(root,'scripts/install-v7-preview.sh'),'utf8');
+const pack=fs.readFileSync(path.join(root,'scripts/package-media-center.mjs'),'utf8');
+const workflow=fs.readFileSync(path.join(root,'.github/workflows/validate.yml'),'utf8');
+test('V7 preview is a separate explicit opt-in path, never the V6 pin',()=>{
+  const stable=fs.readFileSync(path.join(root,'scripts/install-nova-bcn.sh'),'utf8');
+  assert.match(stable,/SOURCE_COMMIT='c8f95f74ecc93eb858801eb2025af8f151e5116e'/);
+  assert.match(stable,/CI_RUN_ID='38127241699'/);
+  assert.match(script,/--install/);
+  assert.match(script,/--check/);
+  assert.match(script,/--rollback/);
+  assert.match(script,/releaseTrack/);
+  assert.match(script,/v7-preview/);
+  assert.match(script,/archiveSha256/);
+  assert.match(script,/Close Spider Media Center completely/);
+  assert.match(script,/cmp -s/);
+  assert.match(script,/app\.asar\.before-v7/);
+  assert.doesNotMatch(script,/systemctl|spider-ai-dj\.service|apt-get|curl|wget/);
+});
+test('preview package contains its own installer, verified build manifest and checksums',()=>{
+  assert.match(pack,/install-v7-preview\.sh/);
+  assert.match(pack,/releaseTrack: 'v7-preview'/);
+  assert.match(pack,/installedPlaybackVerified: false/);
+  assert.match(pack,/archiveSha256: hash/);
+  assert.match(workflow,/bash -n scripts\/install-v7-preview\.sh/);
+  assert.match(workflow,/bash release\/install-v7-preview\.sh --check/);
+});
+test('preview installer refuses missing build inputs without root or installation',()=>{
+  const check=spawnSync('bash',[path.join(root,'scripts/install-v7-preview.sh'),'--check'],{encoding:'utf8'});
+  assert.notEqual(check.status,0);
+  assert.match(check.stderr,/Missing preview build files/);
+  const syntax=spawnSync('bash',['-n',path.join(root,'scripts/install-v7-preview.sh')],{encoding:'utf8'});
+  assert.equal(syntax.status,0,syntax.stderr);
+});

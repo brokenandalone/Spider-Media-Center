@@ -229,6 +229,22 @@ backup scripts, the Windows relay binary and build tools.
 - Keep a rollback copy before installing a new ASAR.
 - Preserve playback, DJ, radio, visualizers, sharing, and queue behavior while adding new Media Center features.
 
+## V6 Nova request reliability and paired install rollback
+
+The native **Nova** DJ remains a single Spider OS service. Media Center now
+serializes overlapping break-generation calls so two end-of-song events do
+not select the same approved listener request or repeat a show introduction.
+Its queue is bounded, and a failed AI response does not mark a dedication
+as prepared. Approved and pending requests survive rotation of completed
+Request Desk history; unsolicited request types cannot override approval.
+
+The combined V6 installer saves a paired backup of the existing Media Center
+archive and the native Nova Python service. A failed Nova installation,
+service restart, or Nova health check restores both components rather than
+leaving mismatched versions installed. Build receipts now live under a
+version-specific Studio/Media/SpiderMediaCenter folder. This installer does
+not update Spider OS itself.
+
 ## BCN controlled relay recovery
 
 If the public Cloudflare Quick Tunnel **exits unexpectedly** after a confirmed

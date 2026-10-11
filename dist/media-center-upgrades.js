@@ -539,12 +539,24 @@
       className: 'bcn-muted',
       text: 'No listener delivery has been verified.'
     });
+    const publicRelayStatus = el('p', { className: 'bcn-muted',
+      text: 'External reachability is not checked yet.' });
     let signalChecking = false;
     const refreshSignal = async () => {
       if (signalChecking || !window.spider?.radioDiagnostics) return;
       signalChecking = true;
       try {
         const signal = await window.spider.radioDiagnostics();
+        const reach = signal.publicRelay || {};
+        const labels = {
+          off_air: 'OFF AIR. No public URL is being checked.',
+          checking: 'Checking the station from the public internet. Three consecutive failures are required before an outage warning.',
+          reachable: 'Public station page is reachable from Spider OS.',
+          degraded: 'WARNING: The public station page has failed three consecutive checks. The tunnel process may still be running.'
+        };
+        publicRelayStatus.textContent = (labels[reach.status] || 'Relay reachability unknown.') +
+          (reach.lastSuccessAt ? ' Last successful check: ' + new Date(reach.lastSuccessAt).toLocaleTimeString() + '.' : '') +
+          ' Remote page checks do not verify audible audio.';
         recoveryState = signal.recovery || null;
         restoreRelay.hidden = !recoveryState?.lost;
         restoreRelay.disabled = !recoveryState?.available;
@@ -570,6 +582,9 @@
           signal.stalledListeners + ' stalled · ' +
           signal.chunksWritten + ' chunks delivered · ' +
           signal.slowDisconnects + ' slow clients disconnected';
+        if (continuityArmed && reach.status === 'degraded') {
+          disarmContinuity('Public station could not be reached. Continuity disarmed pending operator diagnosis.');
+        }
         if (continuityArmed && recoveryState?.lost) {
           disarmContinuity('The public relay dropped. Continuity is disarmed until the operator restores BCN.');
         }
@@ -804,6 +819,7 @@
           text: 'Distinguishes a public relay from data delivery to listener sockets. Connected audio is not proof of playback or audibility on the listener device.' }),
         signalStatus,
         signalCounters,
+        publicRelayStatus,
         checkSignal,
         el('div', { className: 'bcn-section' },
           el('h3', { text: 'Operator Relay Recovery' }),
@@ -857,6 +873,11 @@
           disarmContinuity('Public relay lost. Operator recovery required.');
           void refreshSignal();
         }
+        if (event?.type === 'relay-degraded') {
+          if (continuityArmed) disarmContinuity('Public relay is unreachable. Operator diagnosis required.');
+          void refreshSignal();
+        }
+        if (event?.type === 'relay-reachable') void refreshSignal();
         if (event?.type === 'relay-restored') {
           restoreRights.checked = false;
           void refreshSignal();

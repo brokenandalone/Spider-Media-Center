@@ -197,7 +197,7 @@ test('visualizer color, motion and performance HUD are adjustable without replac
   const h=harness();
   h.frame(100);
   const controls=h.stage.children.find(e=>e.id==='spider3dControls');
-  const [mode,quality,theme,motion,adaptiveButton,statsButton,resetButton,stats]=controls.children;
+  const [mode,quality,theme,motion,adaptiveButton,statsButton,resetButton,theaterButton,stats]=controls.children;
   assert.equal(theme.attributes['aria-label'],'3D visualizer color theme');
   assert.equal(motion.attributes['aria-label'],'3D visualizer motion');
   theme.value='crimson';theme.events.change();

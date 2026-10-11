@@ -7,7 +7,7 @@ scene, color palette, GPU quality and motion setting together. SAVE SCENE
 stores up to twelve custom local presets; DELETE SCENE removes only a
 selected custom preset, never a bundled scene. Stored names and values
 are sanitized and size-limited; no audio files, media paths or user
-content are uploaded. The diagnostics API reports measured draw-frame
+content are uploaded. AUTO SCENES optionally rotates through the scene bank every 90 seconds during active music playback, pauses for hidden windows and video, and requires no timers or background network service. The diagnostics API reports measured draw-frame
 FPS, render resolution, frame counts and GPU initialization failures,
 not merely the selected FPS cap. The existing V6 installer remains
 pinned and unchanged.

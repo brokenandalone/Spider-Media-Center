@@ -62,6 +62,7 @@ try {
     featureHighlights: [
       'radio recovery and relay restoration',
       'listener verification and delivery health monitoring',
+      'public station reachability checks without automatic broadcast startup',
       'native movie compatibility conversion for unsupported local files',
       'AutoDJ continuity guard and show scheduling controls',
       'Nova voice integration and approved request handling',

@@ -197,11 +197,15 @@ test('visualizer color, motion and performance HUD are adjustable without replac
   const h=harness();
   h.frame(100);
   const controls=h.stage.children.find(e=>e.id==='spider3dControls');
-  const [mode,quality,theme,motion,statsButton,stats]=controls.children;
+  const [mode,quality,theme,motion,adaptiveButton,statsButton,resetButton,stats]=controls.children;
   assert.equal(theme.attributes['aria-label'],'3D visualizer color theme');
   assert.equal(motion.attributes['aria-label'],'3D visualizer motion');
   theme.value='crimson';theme.events.change();
   motion.value='still';motion.events.change();
+  adaptiveButton.events.click();
+  assert.equal(adaptiveButton.textContent,'AUTO GPU OFF');
+  adaptiveButton.events.click();
+  assert.equal(adaptiveButton.textContent,'AUTO GPU ON');
   statsButton.events.click();
   h.frame(200);
   const report=h.window.__spider3dControls.diagnostics();
@@ -209,7 +213,7 @@ test('visualizer color, motion and performance HUD are adjustable without replac
   assert.equal(report.motion,'still');
   assert.equal(stats.hidden,false);
   assert.match(stats.textContent,/FPS cap/);
-  h.window.__spider3dControls.reset();
+  resetButton.events.click();
   assert.equal(h.window.__spider3dControls.diagnostics().theme,'purple');
 });
 

@@ -53,7 +53,7 @@ class PublicRelayWatch {
     this.onTransition = typeof onTransition === 'function' ? onTransition : () => {};
     this.status = 'checking';
     this.timer = this.setInterval(() => { void this.check(); }, this.intervalMs);
-    void this.check();
+    return this.check();
   }
   stop() { this.reset(); }
   async check() {

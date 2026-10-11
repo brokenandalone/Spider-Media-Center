@@ -4,7 +4,7 @@
 set -Eeuo pipefail
 umask 077
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-NOVA_OS_COMMIT='980fccf98e4dfdfdb27b32a49c46158ca752a79c'
+NOVA_OS_COMMIT='e9b13a65c26eb4975aebce13177f84c9190efb48'
 NOVA_OS_REPO='brokenandalone/spider-narive-os'
 NOVA_TARGET='/usr/local/lib/spider-os/media/ai-dj'
 MEDIA_TARGET='/opt/spider-media-center/resources/app.asar'
@@ -56,6 +56,38 @@ for filename in nova_host.py service.py; do
   [[ -s "$WORK/nova/$filename" ]] || { echo "Nova download empty: $filename" >&2; exit 1; }
 done
 PYTHONPYCACHEPREFIX="$WORK/python-cache" python3 -m py_compile "$WORK/nova/"*.py
+# Syntax validation alone missed a real HTTPMessage collision in Nova.
+# Exercise the downloaded Handler over an ephemeral loopback port without
+# touching the live 9876 server, disk backups, or any user services.
+PYTHONPYCACHEPREFIX="$WORK/python-cache" python3 - "$WORK/nova" <<'PY'
+import importlib,json,sys,threading,urllib.error,urllib.request
+from http.server import ThreadingHTTPServer
+sys.path.insert(0,sys.argv[1])
+service=importlib.import_module('service')
+opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+with ThreadingHTTPServer(('127.0.0.1',0),service.Handler) as server:
+    thread=threading.Thread(target=server.serve_forever,daemon=True)
+    thread.start()
+    try:
+        url='http://127.0.0.1:'+str(server.server_port)
+        with opener.open(url+'/health',timeout=4) as response:
+            payload=json.load(response)
+            if response.status!=200 or payload.get('ok') is not True or payload.get('host')!='Nova':
+                raise RuntimeError('Nova HTTP /health returned invalid identity: '+repr(payload))
+        with opener.open(urllib.request.Request(url+'/health',method='OPTIONS'),timeout=4) as response:
+            if response.status!=204:
+                raise RuntimeError('Nova HTTP OPTIONS response was invalid')
+        try:
+            opener.open(urllib.request.Request(url+'/not-found',data=b'{}',method='POST'),timeout=4)
+            raise RuntimeError('Nova HTTP unknown POST path returned success')
+        except urllib.error.HTTPError as error:
+            if error.code!=404 or json.load(error).get('error')!='not found':
+                raise RuntimeError('Nova HTTP unknown POST response was invalid') from error
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+print('Pinned Nova HTTP preflight passed: health, OPTIONS and JSON 404.')
+PY
 # Backups of both Nova files are prepared before any installation.
 STORAGE="$HOME/Studio/Media/SpiderMediaCenter/v7/paired-backups"
 mkdir -p -m700 -- "$STORAGE"

@@ -207,6 +207,20 @@ const state = {
   transfers: new Map()
 };
 
+// The WebGL visualizer borrows the existing mixer analyser data. It never
+// creates a second AudioContext or copies private media paths to the DOM.
+window.__spiderVisualizerSnapshot = () => {
+  const graph = state.audioGraphs[state.activeDeck];
+  const deck = activeMedia();
+  return {
+    mode: state.visualizerMode,
+    playing: Boolean(graph && deck && !deck.paused),
+    bands: graph?.frequencyData || null,
+    lightweight: state.lightweightMode,
+    isVideo: isVideoItem(currentItem())
+  };
+};
+
 const EQ_FREQUENCIES = [20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000];
 const IDLE_FREQUENCY_DATA = new Uint8Array(1024);
 const IDLE_WAVE_DATA = new Uint8Array(2048).fill(128);
@@ -335,6 +349,10 @@ function restoreState() {
       'neon-graves',
       'unbroken-signal',
       'broken-city-live',
+      '3d-tunnel',
+      '3d-spectrum',
+      '3d-orbit',
+      '3d-broken-city',
       'off'
     ].includes(saved.visualizerMode) ? saved.visualizerMode : 'web';
     state.lightweightMode = Boolean(saved.lightweightMode);
@@ -731,7 +749,7 @@ function visualizerFrame(time) {
   }
   context.clearRect(0, 0, width, height);
 
-  if (state.visualizerMode === 'off') {
+  if (state.visualizerMode === 'off' || state.visualizerMode.startsWith('3d-')) {
     requestAnimationFrame(visualizerFrame);
     return;
   }
@@ -2217,6 +2235,22 @@ window.__spiderPlayerEngine = {
   setVolume: (value) => { const amount = Math.max(0, Math.min(100, Number(value) || 0)); state.masterVolume = amount / 100; decks.forEach((deck) => applyDeckVolume(deck)); saveState(); return getReactPlayerSnapshot(); },
   toggleMute: () => { state.muted = !state.muted; decks.forEach((deck) => applyDeckVolume(deck)); if (state.novaVoiceGain && state.audioContext) state.novaVoiceGain.gain.setTargetAtTime(state.muted || state.panicMuted ? 0 : state.aiDj.voiceVolume, state.audioContext.currentTime, 0.01); return getReactPlayerSnapshot(); },
   setCrossfade: (value) => { const seconds = Math.max(0, Math.min(12, Number(value) || 0)); state.crossfade = seconds; if (!IS_REACT_UI) { const control = $('#crossfade'); if (control) control.value = String(seconds); const label = $('#crossfadeValue'); if (label) label.textContent = `${seconds}s`; const gapless = $('#gaplessChip'); if (gapless) gapless.textContent = seconds ? 'CROSSFADE ON' : 'GAPLESS ON'; } saveState(); return getReactPlayerSnapshot(); },
+  setVisualizerMode: (mode) => {
+    const modes = ['web','bars','wave','spider','nebula','pulse',
+      '3d-tunnel','3d-spectrum','3d-orbit','3d-broken-city',
+      'bcn-emergency-broadcast','broken-skyline','mercer-ninth',
+      'his-honor','hollow-man','platform-six','dead-district',
+      'apartment-17','bcn-nightwatch','house-of-echoes',
+      'neon-graves','unbroken-signal','broken-city-live','off'];
+    if (!modes.includes(mode)) return getReactPlayerSnapshot();
+    state.visualizerMode = mode;
+    if (!IS_REACT_UI) {
+      const button = $('#visualizerModeButton');
+      if (button) button.textContent = 'VISUALIZER · ' + mode.toUpperCase();
+    }
+    saveState();
+    return getReactPlayerSnapshot();
+  },
   cycleVisualizer: () => {
     const modes = [
       'web',
@@ -2238,6 +2272,10 @@ window.__spiderPlayerEngine = {
       'neon-graves',
       'unbroken-signal',
       'broken-city-live',
+      '3d-tunnel',
+      '3d-spectrum',
+      '3d-orbit',
+      '3d-broken-city',
       'off'
     ];
     state.visualizerMode = modes[(modes.indexOf(state.visualizerMode) + 1) % modes.length];
@@ -3275,34 +3313,7 @@ if (!window.__SPIDER_REACT_PLAYER__) {
     saveState();
   };
 
-  $('#visualizerModeButton').onclick = () => {
-    const modes = [
-      'web',
-      'bars',
-      'wave',
-      'off'
-    ];
-
-    state.visualizerMode =
-      modes[
-        (
-          modes.indexOf(
-            state.visualizerMode
-          ) + 1
-        ) % modes.length
-      ];
-
-    $('#visualizerModeButton').textContent =
-      `VISUALIZER · ${state.visualizerMode.toUpperCase()}`;
-
-    toast(
-      state.visualizerMode === 'off'
-        ? 'Visualizer off'
-        : `${state.visualizerMode} visualizer`
-    );
-
-    saveState();
-  };
+  $('#visualizerModeButton').onclick = () => window.__spiderPlayerEngine.cycleVisualizer();
 }
 
 if (!IS_REACT_UI) {

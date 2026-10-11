@@ -9,7 +9,7 @@
   const legacyKey='spider.visualizer.3d.quality';
   const governor=new performanceKit.AdaptiveGovernor();
   let stage=null,canvas=null,controls=null,selector=null,qualitySelect=null,status=null;
-  let themeSelect=null,motionSelect=null,statsButton=null,stats=null;
+  let themeSelect=null,motionSelect=null,statsButton=null,stats=null,adaptiveButton=null,resetButton=null;
   let oldCanvas=null,oldCanvasVisibility=null;
   let settings=performanceKit.sanitize();
   let gpu=null,unavailable=false,contextLost=false,lastFrame=0,modeShown='';
@@ -133,6 +133,19 @@
     }
     motionSelect.value=settings.motion;
     motionSelect.addEventListener('change',()=>selectMotion(motionSelect.value));
+    adaptiveButton=document.createElement('button');
+    adaptiveButton.type='button';
+    adaptiveButton.setAttribute('aria-label','Toggle automatic 3D resolution scaling');
+    const syncAdaptive=()=>{adaptiveButton.textContent=settings.adaptive?'AUTO GPU ON':'AUTO GPU OFF';};
+    adaptiveButton.addEventListener('click',()=>{
+      settings.adaptive=!settings.adaptive;
+      governor.reset();syncAdaptive();saveSettings();
+    });
+    syncAdaptive();
+    resetButton=document.createElement('button');
+    resetButton.type='button';resetButton.textContent='RESET';
+    resetButton.setAttribute('aria-label','Reset 3D visualizer preferences');
+    resetButton.addEventListener('click',()=>window.__spider3dControls.reset());
     statsButton=document.createElement('button');
     statsButton.type='button';statsButton.textContent='GPU STATS';
     statsButton.setAttribute('aria-label','Toggle 3D performance statistics');
@@ -148,10 +161,10 @@
     status.setAttribute('role','status');
     status.textContent='3D ready';
     status.style.cssText='font:10px system-ui;color:#d8b5ff;text-shadow:0 1px 2px black';
-    for(const input of [selector,qualitySelect,themeSelect,motionSelect,statsButton]){
+    for(const input of [selector,qualitySelect,themeSelect,motionSelect,adaptiveButton,statsButton,resetButton]){
       input.style.cssText='color:#f2d9ff;background:#180d25;border:1px solid #9851c4;border-radius:7px;font:11px system-ui;padding:6px;max-width:170px';
     }
-    controls.append(selector,qualitySelect,themeSelect,motionSelect,statsButton,stats,status);
+    controls.append(selector,qualitySelect,themeSelect,motionSelect,adaptiveButton,statsButton,resetButton,stats,status);
     // The React player already supplies a fullscreen control. The classic
     // player gets the same affordance without modifying its legacy layout.
     if (!parent.querySelector?.('.visualizer-fullscreen')) {
@@ -257,6 +270,8 @@
     qualitySelect.hidden=!is3d;
     themeSelect.hidden=!is3d;
     motionSelect.hidden=!is3d;
+    adaptiveButton.hidden=!is3d;
+    resetButton.hidden=!is3d;
     statsButton.hidden=!is3d;
     stats.hidden=!is3d||!settings.showStats;
     status.hidden=!is3d;
@@ -275,7 +290,7 @@
       governor.record(elapsed,fps,settings.adaptive && !snapshot.lightweight);
       if(stats && settings.showStats){
         const report=governor.snapshot();
-        stats.textContent=canvas.width+'×'+canvas.height+' · '+fps+' FPS cap · GPU '+Math.round(report.scale*100)+'% · '+report.p75Ms.toFixed(1)+'ms p75';
+        stats.textContent=canvas.width+'×'+canvas.height+' · '+fps+' FPS cap · render '+Math.round(report.scale*100)+'% · '+report.p75Ms.toFixed(1)+'ms submit p75';
       }
     }
     catch(error){
@@ -312,6 +327,7 @@
     reset:()=>{
       settings=performanceKit.sanitize();
       selectQuality('balanced');selectTheme('purple');selectMotion('full');
+      if(adaptiveButton)adaptiveButton.textContent='AUTO GPU ON';
       if(themeSelect)themeSelect.value='purple';
       if(motionSelect)motionSelect.value='full';
       if(stats)stats.hidden=true;

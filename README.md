@@ -6,10 +6,10 @@ It is being rebuilt from the known-good **Spider Media Player 7.5.0 “Kabel”*
 
 ## Current status
 
-**Version:** 5.0.0  
+**Version:** 6.0.0  
 **Platform focus:** Linux / Spider OS  
 **Desktop stack:** Electron + React  
-**Baseline:** Spider Media Player 7.5.0 “Kabel” / V5.0 compatibility layer
+**Baseline:** Spider Media Player 7.5.0 “Kabel” / V5.0 compatibility layer, now refreshed in the V6 major upgrade pass
 
 The current repository includes the working Media Center baseline plus the Linux and Spider Radio fixes completed during the 1.0 migration.
 
@@ -38,6 +38,40 @@ The current repository includes the working Media Center baseline plus the Linux
 - Bluetooth settings integration
 - Linux media keys
 - Local Linux speech fallback through espeak-ng
+
+## V6 public relay health monitor
+
+V6 adds a functional **BCN public relay reachability watch** to the
+existing audio-delivery Signal Monitor. When the operator has already started
+a broadcast, the application probes the current public listener state page
+every 30 seconds. Three consecutive failed or malformed responses flag a
+**degraded public relay** even if the Cloudflare tunnel process did not exit.
+A successful check clears the warning. Private URLs and stream tokens are
+not included in the diagnostics results.
+
+This watch **does not restart a public broadcast** or change the station URL.
+The existing explicit operator recovery action remains for a tunnel-process
+exit, and the normal broadcast controls remain available if the internet
+path is degraded without process exit.
+
+Public-page reachability, listener socket chunk delivery, and actual audible
+playback are three separate states. The first two are observable by Spider OS;
+the last must still be checked with a real listening device.
+
+V6 also synchronizes the package metadata and lockfile version to 6.0.0,
+preventing the earlier version mismatch in build and installation metadata.
+
+## V6 major feature upgrades
+
+This major pass focuses on the features that make the Media Center release feel production-ready on Linux and Spider OS:
+
+- Improved radio recovery and relay restoration for public broadcasts
+- Listener verification, delivery health monitoring, and stale-link detection
+- Native movie compatibility conversion to cached WebM for unsupported local files
+- AutoDJ continuity guard and show scheduling controls for BCN-style operations
+- Nova voice integration, approved listener requests, and local generated audio flow
+- Better Linux integration for media keys, cloudflared discovery, and app lifecycle behavior
+- Release packaging and installer verification for repeatable upgrades and rollback safety
 
 ## Spider Radio
 

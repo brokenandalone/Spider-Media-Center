@@ -28,6 +28,7 @@ const { BcnDesk } = require('./bcn-desk.cjs');
 const { BcnListenerIntake } = require('./bcn-listener-intake.cjs');
 const { RadioTelemetry } = require('./radio-telemetry.cjs');
 const { RadioRecoveryState, safeProfile } = require('./radio-recovery.cjs');
+const { PublicRelayWatch } = require('./radio-relay-probe.cjs');
 let bcnDesk;
 function programmingDesk() {
   return bcnDesk ||= new BcnDesk({ file: path.join(app.getPath('userData'), 'bcn-desk.json') });
@@ -116,6 +117,12 @@ const sharedFiles = new Map();
 const radioListeners = new Map();
 const radioTelemetry = new RadioTelemetry();
 const radioRecovery = new RadioRecoveryState();
+const radioRelayWatch = new PublicRelayWatch({ allowLocal: process.env.SPIDER_RADIO_TEST_LOCAL === '1' });
+function watchActiveRelay() {
+  radioRelayWatch.start(radioState.publicUrl, radioState.name, (result) => {
+    sendRadioEvent({ type: result.status === 'degraded' ? 'relay-degraded' : 'relay-reachable', reachability: result });
+  });
+}
 let radioOperation = Promise.resolve();
 function serializeRadioOperation(action) {
   const next = radioOperation.then(action, action);
@@ -1054,6 +1061,7 @@ function radioListenerHtml(token) {
 }
 
 async function stopRadioServer() {
+  radioRelayWatch.stop();
   for (const [id, response] of radioListeners) {
     sendRadioEvent({ type: 'listener-disconnected', id });
     try { response.end(); } catch { }
@@ -1172,6 +1180,7 @@ async function startRadioServer(profile) {
   if (process.env.SPIDER_RADIO_TEST_LOCAL === '1') {
     radioState.publicUrl = `http://127.0.0.1:${port}/${token}`;
     radioState.qrDataUrl = await QRCode.toDataURL(radioState.publicUrl, { width: 360, margin: 1, color: { dark: '#261033', light: '#f2e5ff' } });
+    watchActiveRelay();
     sendRadioEvent({ type: 'live', state: { ...radioState, token: undefined } });
     return { ...radioState, token: undefined };
   }
@@ -1229,6 +1238,7 @@ async function startRadioServer(profile) {
   });
   radioState.publicUrl = `${publicBase}/${token}`;
   radioState.qrDataUrl = await QRCode.toDataURL(radioState.publicUrl, { width: 360, margin: 1, color: { dark: '#261033', light: '#f2e5ff' } });
+  watchActiveRelay();
   sendRadioEvent({ type: 'live', state: { ...radioState, token: undefined } });
   return { ...radioState, token: undefined };
 }
@@ -1453,7 +1463,8 @@ ipcMain.handle('radio:diagnostics', (event) => {
       active: radioState.active,
       publicUrl: radioState.publicUrl
     }),
-    recovery: radioRecovery.retryState(radioState.active)
+    recovery: radioRecovery.retryState(radioState.active),
+    publicRelay: radioRelayWatch.snapshot()
   };
 });
 ipcMain.on('radio:chunk', (event, listenerId, bytes) => {

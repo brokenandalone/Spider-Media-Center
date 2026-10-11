@@ -13,7 +13,7 @@ const output = path.resolve(process.argv[2] || path.join(root, 'release'));
 const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'spider-media-build-'));
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const runtime = ['main.cjs', 'preload.cjs', 'renderer.js', 'renderer.audio.js',
-  'renderer.bridge.js', 'network-directory.cjs', 'media-compatibility.cjs', 'nova-service.cjs', 'bcn-desk.cjs', 'bcn-listener-intake.cjs', 'radio-telemetry.cjs', 'radio-recovery.cjs',
+  'renderer.bridge.js', 'network-directory.cjs', 'media-compatibility.cjs', 'nova-service.cjs', 'bcn-desk.cjs', 'bcn-listener-intake.cjs', 'radio-telemetry.cjs', 'radio-recovery.cjs', 'radio-relay-probe.cjs',
   'player.html', 'offline.html', 'styles.css'];
 try {
   fs.mkdirSync(output, { recursive: true });
@@ -57,6 +57,18 @@ try {
     displayName: 'Spider Media Center',
     version: releaseVersion,
     compatibilityBaseline: 'V5.0',
+    majorUpgrade: true,
+    releaseTrack: 'major-upgrade',
+    featureHighlights: [
+      'radio recovery and relay restoration',
+      'listener verification and delivery health monitoring',
+      'public station reachability checks without automatic broadcast startup',
+      'native movie compatibility conversion for unsupported local files',
+      'AutoDJ continuity guard and show scheduling controls',
+      'Nova voice integration and approved request handling',
+      'Linux media-key and cloudflared integration',
+      'repeatable installer and rollback packaging'
+    ],
     sourceRevision: revision,
     node: process.version,
     archiveSha256: hash(fs.readFileSync(archive)),

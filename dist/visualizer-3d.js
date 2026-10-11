@@ -224,6 +224,10 @@
     oldCanvas=null;oldCanvasVisibility=null;
     canvas?.remove();controls?.remove();
     governor.reset();
+    // A replaced React stage may leave fullscreen; do not strand the
+    // previous stage's fullscreen owner or its controls.
+    if(cinemaActive())void document.exitFullscreen?.().catch?.(()=>{});
+
     stage=node;
     oldCanvas=stage.querySelector?.('#visualizerCanvas')||null;
     if(oldCanvas)oldCanvasVisibility=oldCanvas.style.visibility;
@@ -285,13 +289,7 @@
     gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
   }
   function loop(time){
-    document.addEventListener('fullscreenchange',syncCinema);
-  // Fullscreen belongs to the stage only; the media library, transport,
-  // Nova and radio controls are never reparented or restarted.
-  const cinemaStyle=document.createElement('style');
-  cinemaStyle.textContent='#mediaStage:fullscreen{width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;background:#06020c!important;overflow:hidden!important}#mediaStage:fullscreen #spider3dCanvas{width:100%!important;height:100%!important}#mediaStage:fullscreen #spider3dControls{z-index:999!important;max-width:calc(100% - 32px)!important}';
-  (document.head||document.documentElement)?.append(cinemaStyle);
-  window.requestAnimationFrame(loop);
+    window.requestAnimationFrame(loop);
     if(!findStage())return;
     const snapshot=window.__spiderVisualizerSnapshot?.();
     if(!snapshot)return;
@@ -359,6 +357,12 @@
       quality='eco';settings.motion='still';
     }
   }catch{settings=performanceKit.sanitize();}
+  // Install once, never once per animation frame.
+  document.addEventListener('fullscreenchange',syncCinema);
+  const cinemaStyle=document.createElement('style');
+  cinemaStyle.id='spider3dCinemaStyle';
+  cinemaStyle.textContent='#mediaStage:fullscreen{width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;background:#06020c!important;overflow:hidden!important}#mediaStage:fullscreen #spider3dCanvas{width:100%!important;height:100%!important}#mediaStage:fullscreen #spider3dControls{z-index:999!important;max-width:calc(100% - 32px)!important}';
+  (document.head||document.documentElement)?.append(cinemaStyle);
   window.requestAnimationFrame(loop);
   window.__spider3dControls={
     modes:MODES,quality:()=>quality,

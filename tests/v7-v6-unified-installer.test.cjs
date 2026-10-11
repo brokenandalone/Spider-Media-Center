@@ -12,7 +12,7 @@ const workflow=fs.readFileSync(path.join(root,'.github/workflows/validate.yml'),
 test('single combined installer bundles V7 preview and pinned existing V6 Nova',()=>{
  assert.match(combined,/install-v7-preview\.sh" --check/);
  assert.match(combined,/install-v7-preview\.sh" --install/);
- assert.match(combined,/NOVA_OS_COMMIT='980fccf98e4dfdfdb27b32a49c46158ca752a79c'/);
+ assert.match(combined,/NOVA_OS_COMMIT='e9b13a65c26eb4975aebce13177f84c9190efb48'/);
  assert.match(combined,/systemctl --user restart spider-ai-dj\.service/);
  assert.match(combined,/health\.get\('host'\)=='Nova'/);
  assert.doesNotMatch(combined,/apt-get|systemctl enable|curl.*latest/);
@@ -44,4 +44,16 @@ test('Nova recovery exposes read-only diagnostics and avoids proxying loopback',
  assert.match(combined,/Rollback files verified byte-for-byte/);
  assert.match(combined,/WARNING: Rollback requires manual inspection/);
  assert.match(combined,/for attempt in range\(16\)/);
+});
+
+test('corrected Nova is exercised through real HTTP before any backup or file replacement',()=>{
+ const preflight=combined.indexOf("PYTHONPYCACHEPREFIX=\"$WORK/python-cache\" python3 - \"$WORK/nova\"");
+ const backups=combined.indexOf('STORAGE="$HOME/Studio/Media/SpiderMediaCenter/v7/paired-backups"');
+ assert.ok(preflight>0 && preflight<backups);
+ assert.match(combined,/ThreadingHTTPServer\(\('127\.0\.0\.1',0\),service\.Handler\)/);
+ assert.match(combined,/opener\.open\(url\+'\/health'/);
+ assert.match(combined,/method='OPTIONS'/);
+ assert.match(combined,/Nova HTTP preflight passed/);
+ assert.match(combined,/NOVA_OS_COMMIT='e9b13a65c26eb4975aebce13177f84c9190efb48'/);
+ assert.doesNotMatch(combined,/NOVA_OS_COMMIT='980fccf98e4dfdfdb27b32a49c46158ca752a79c'/);
 });

@@ -208,7 +208,9 @@
     lastFrame=time;
     const bounds=stage.getBoundingClientRect();
     if(bounds.width<2||bounds.height<2)return;
-    try{draw(time,snapshot,bounds);}
+    // Only sample audio at the actual, throttled render frequency.
+    const audioSnapshot=window.__spiderVisualizerSnapshot?.({sampleAudio:true}) || snapshot;
+    try{draw(time,audioSnapshot,bounds);}
     catch(error){
       unavailable=true;dispose();switchMode('web');
       if(status)status.textContent='GPU unsupported · 2D fallback';

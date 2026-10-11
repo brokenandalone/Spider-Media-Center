@@ -57,6 +57,17 @@ try {
     displayName: 'Spider Media Center',
     version: releaseVersion,
     compatibilityBaseline: 'V5.0',
+    majorUpgrade: true,
+    releaseTrack: 'major-upgrade',
+    featureHighlights: [
+      'radio recovery and relay restoration',
+      'listener verification and delivery health monitoring',
+      'native movie compatibility conversion for unsupported local files',
+      'AutoDJ continuity guard and show scheduling controls',
+      'Nova voice integration and approved request handling',
+      'Linux media-key and cloudflared integration',
+      'repeatable installer and rollback packaging'
+    ],
     sourceRevision: revision,
     node: process.version,
     archiveSha256: hash(fs.readFileSync(archive)),

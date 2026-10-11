@@ -6,10 +6,10 @@ It is being rebuilt from the known-good **Spider Media Player 7.5.0 “Kabel”*
 
 ## Current status
 
-**Version:** 5.0.0  
+**Version:** 6.0.0  
 **Platform focus:** Linux / Spider OS  
 **Desktop stack:** Electron + React  
-**Baseline:** Spider Media Player 7.5.0 “Kabel” / V5.0 compatibility layer
+**Baseline:** Spider Media Player 7.5.0 “Kabel” / V5.0 compatibility layer, now refreshed in the V6 major upgrade pass
 
 The current repository includes the working Media Center baseline plus the Linux and Spider Radio fixes completed during the 1.0 migration.
 
@@ -38,6 +38,18 @@ The current repository includes the working Media Center baseline plus the Linux
 - Bluetooth settings integration
 - Linux media keys
 - Local Linux speech fallback through espeak-ng
+
+## V6 major feature upgrades
+
+This major pass focuses on the features that make the Media Center release feel production-ready on Linux and Spider OS:
+
+- Improved radio recovery and relay restoration for public broadcasts
+- Listener verification, delivery health monitoring, and stale-link detection
+- Native movie compatibility conversion to cached WebM for unsupported local files
+- AutoDJ continuity guard and show scheduling controls for BCN-style operations
+- Nova voice integration, approved listener requests, and local generated audio flow
+- Better Linux integration for media keys, cloudflared discovery, and app lifecycle behavior
+- Release packaging and installer verification for repeatable upgrades and rollback safety
 
 ## Spider Radio
 

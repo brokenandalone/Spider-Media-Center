@@ -32,6 +32,7 @@ window.__spiderPlayerBridge = {
   toggleMute() { return engine.toggleMute(); },
   setCrossfade(v) { return engine.setCrossfade(v); },
   cycleVisualizer() { return engine.cycleVisualizer(); },
+  setVisualizerMode(mode) { return engine.setVisualizerMode(mode); },
   testTone(f, d, v) { return engine.testTone ? engine.testTone(f, d, v) : { ok: false, message: 'no test tone support' } },
   resetAudio() { return engine.resetAudio ? engine.resetAudio() : { ok: false, message: 'no reset support' } },
   getDiagnostics() { return engine.getDiagnostics ? engine.getDiagnostics() : { track: 'unavailable', mixer: 'unavailable', speakers: 'unavailable', broadcast: 'unavailable' } },

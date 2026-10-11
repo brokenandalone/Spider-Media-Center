@@ -31,6 +31,8 @@ jobs:
           node --check electron/radio-relay-probe.cjs
           node --check dist/assets/index-Dt0TTW2G.js
           node --check dist/media-center-upgrades.js
+          node --check dist/visualizer-3d-shaders.js
+          node --check dist/visualizer-3d.js
       - name: Validate one-command Spider OS installer
         run: |
           bash -n scripts/install-nova-bcn.sh

@@ -27,6 +27,27 @@ restores both after failed native source installation, service restart or
 health confirmation. Previous installer backups remain available. The script
 does not perform Spider OS installation, kernel changes or OS upgrades.
 
+## V7 3D visualizer device acceptance (preview branch only)
+
+This branch packages its own offline vertex and fragment shaders, plus a
+WebGL1 renderer and controlled GPU quality. Verify the following **on the
+actual Spider OS GPU** before releasing it:
+- With audio playing, select 3D Tunnel, Spectrum, Orbit, and Broken City.
+  Confirm each scene responds to bass and mid/high frequencies.
+- Switch among Eco, Balanced, and Ultra quality, then resize the window.
+  Confirm there is no crash and playback does not lose audio.
+- Enter/exit fullscreen, test Shift+V and reopen the app to verify that
+  the selected 3D scene and quality preference survive.
+- Play a movie and verify the visualizer hides behind the video.
+- Disable hardware acceleration or use a WebGL-incompatible system and
+  verify that the normal 2D visualizer remains usable.
+- Check BCN radio and native Nova with a separate listening device. The
+  visualizer must not change the broadcast's audio stream.
+
+V6's existing one-command installer still points to the previously
+verified V6 code. A V7 installable release needs its own build, testing
+and explicit promotion instead of silently overwriting the existing V6.
+
 ## V6 reachability and version validation
 
 V6 checks the current temporary public BCN listener page roughly every 30

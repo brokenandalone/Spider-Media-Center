@@ -38,7 +38,7 @@ try {
     const name = path.relative(stage, file).split(path.sep).join('/');
     if (hash(extractFile(archive, name)) !== hash(fs.readFileSync(file))) throw new Error('Archive mismatch: ' + name);
   }
-  for (const name of [...runtime.map(n => 'electron/' + n), 'dist/index.html', 'dist/media-center-upgrades.js', 'assets/icon-512.png', 'package.json']) {
+  for (const name of [...runtime.map(n => 'electron/' + n), 'dist/index.html', 'dist/media-center-upgrades.js', 'dist/visualizer-3d-shaders.js', 'dist/visualizer-3d.js', 'assets/icon-512.png', 'package.json']) {
     if (hash(extractFile(archive, name)) !== hash(fs.readFileSync(path.join(stage, name)))) throw new Error('Archive mismatch: ' + name);
   }
   const entries = listPackage(archive);

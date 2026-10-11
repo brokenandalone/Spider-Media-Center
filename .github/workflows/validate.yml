@@ -32,6 +32,7 @@ jobs:
           node --check dist/assets/index-Dt0TTW2G.js
           node --check dist/media-center-upgrades.js
           node --check dist/visualizer-3d-shaders.js
+          node --check dist/visualizer-performance.js
           node --check dist/visualizer-3d.js
       - name: Validate one-command Spider OS installer
         run: |

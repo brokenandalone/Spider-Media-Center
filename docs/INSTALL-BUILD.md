@@ -1,3 +1,47 @@
+# V7 isolated preview build (not yet hardware validated)
+
+This release bundle now contains **install-v7-preview.sh**, an opt-in
+preview installer distinct from the V6 Nova/BCN installer. It changes
+only the existing Media Center `/opt/spider-media-center/resources/app.asar`,
+not Spider OS, Nova's native service, Webbie or your media libraries.
+
+After downloading the GitHub Actions release artifact and extracting
+it, first verify integrity **without sudo**:
+
+```bash
+bash install-v7-preview.sh --check
+```
+
+This checks every SHA256SUMS entry and verifies that build.json explicitly
+marks an unverified V7 preview with the exact archive SHA and source
+revision. A successful check is **not** proof of GPU or radio operation.
+
+Close Spider Media Center and deliberately opt in:
+
+```bash
+sudo bash install-v7-preview.sh --install
+```
+
+The installer refuses to run over a symlink or active Media Center
+process, verifies the original backup, and atomically swaps in the
+new archive. It prints the full backup path and a precise rollback
+command. To roll back, close the player and run the printed command:
+
+```bash
+sudo bash install-v7-preview.sh --rollback /opt/spider-media-center/resources/v7-preview-backups/app.asar.before-v7-REPLACE-WITH-PRINTED-NAME
+```
+
+Do **not** type the placeholder filename literally. Use the exact backup
+path the installer printed. The backup is stored under the dedicated
+V7 preview backup directory. The original V6 combined installer remains
+pinned to the previous verified release, and no V7 upgrade is
+automatically installed on the user's machine.
+
+On the actual Spider OS GPU, test all four 3D scenes, the eight
+cinematic presets, Eco/Balanced/Ultra, fullscreen entry/exit,
+custom scene persistence, music-to-video transitions, Nova voice
+breaks and BCN listener audio before considering V7 stable.
+
 ## V7 Cinema lifecycle acceptance (pending physical GPU test)
 
 The visualizer must register the fullscreen listener and stylesheet once,

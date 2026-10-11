@@ -12,6 +12,18 @@ phone audio. Normal **Stop broadcast** must not offer recovery. There is no
 automatic restart, no reuse of an expired listener link, and no second DJ
 daemon.
 
+## V6 reachability and version validation
+
+V6 checks the current temporary public BCN listener page roughly every 30
+seconds while the operator's broadcast is active. In **BCN Media > BCN Signal
+Monitor**, the public relay check reports a reachable station page or warns
+after three consecutive failed checks. A successful page fetch is *not* an
+audio-listening test. Verify sound with a separate phone and headphones.
+
+The build metadata and npm lockfile now identify the same V6 release. The
+existing combined installer continues to install the Media Center archive
+and the single native Nova DJ service; no additional DJ daemon is created.
+
 ## Verify actual BCN stream delivery
 
 After starting a **permitted** BCN broadcast, open **BCN Media > BCN Signal

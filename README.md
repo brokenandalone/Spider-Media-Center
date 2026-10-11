@@ -39,6 +39,28 @@ The current repository includes the working Media Center baseline plus the Linux
 - Linux media keys
 - Local Linux speech fallback through espeak-ng
 
+## Immersive performance studio upgrade (development branch)
+
+Spider's local 3D visualizer now has five live color palettes
+(Purple, Crimson, Ice, Emerald, Gold), Full/Calm/Still motion, and
+Eco/Balanced/Ultra GPU presets. Adaptive resolution uses bounded,
+conservative frame-submission timing to scale rendering down when
+needed and gradually recover quality. It is not a hardware GPU
+benchmark or a guaranteed frame rate. Turn AUTO GPU on/off from the
+visualizer stage. The GPU STATS toggle shows resolution, FPS cap,
+current adaptive render scale and p75 CPU submission time. RESET
+restores default preferences. Settings persist locally and are
+validated before use.
+
+Reduced-motion OS preferences start 3D in Still/Eco mode. The
+original 2D canvas is hidden only while the 3D scene is visible,
+then restored when switching modes or playing video. This avoids
+layering two animated visualizers on top of one another. No
+extra media engine, new network dependency or cloud data transfer.
+
+This upgrade is not in the existing pinned V6 installer and needs
+physical GPU testing before promoting a new installer build.
+
 ## V7 development preview: true 3D audio visualizer
 
 The next upgrade round introduces a **real offline WebGL shader visualizer**,

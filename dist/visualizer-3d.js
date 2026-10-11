@@ -9,7 +9,7 @@
   const legacyKey='spider.visualizer.3d.quality';
   const governor=new performanceKit.AdaptiveGovernor();
   let stage=null,canvas=null,controls=null,selector=null,qualitySelect=null,status=null;
-  let themeSelect=null,motionSelect=null,statsButton=null,stats=null,adaptiveButton=null,resetButton=null;
+  let themeSelect=null,motionSelect=null,statsButton=null,stats=null,adaptiveButton=null,resetButton=null,theaterButton=null;
   let oldCanvas=null,oldCanvasVisibility=null;
   let settings=performanceKit.sanitize();
   let gpu=null,unavailable=false,contextLost=false,lastFrame=0,modeShown='';
@@ -93,6 +93,31 @@
     settings.motion=value==='calm'||value==='still'?value:'full';
     saveSettings();
   }
+  function cinemaActive(){
+    return !!(stage && document.fullscreenElement===stage);
+  }
+  async function toggleCinema(){
+    const snapshot=window.__spiderVisualizerSnapshot?.();
+    if(!stage || !snapshot?.mode?.startsWith('3d-') || snapshot.isVideo)return;
+    try{
+      if(cinemaActive())await document.exitFullscreen();
+      else if(document.fullscreenElement) {
+        await document.exitFullscreen();
+        await stage.requestFullscreen();
+      }else await stage.requestFullscreen();
+    }catch(error){
+      window.dispatchEvent(new CustomEvent('spider:notice',{detail:{
+        message:'Cinema fullscreen unavailable: '+String(error?.message||'unsupported')
+      }}));
+    }
+    syncCinema();
+  }
+  function syncCinema(){
+    if(theaterButton){
+      theaterButton.textContent=cinemaActive()?'EXIT CINEMA':'CINEMA';
+      theaterButton.setAttribute('aria-pressed',String(cinemaActive()));
+    }
+  }
   function makeControls(parent){
     controls=document.createElement('div');
     controls.id='spider3dControls';
@@ -142,6 +167,11 @@
       governor.reset();syncAdaptive();saveSettings();
     });
     syncAdaptive();
+    theaterButton=document.createElement('button');
+    theaterButton.type='button';theaterButton.textContent='CINEMA';
+    theaterButton.setAttribute('aria-label','Toggle immersive fullscreen 3D cinema');
+    theaterButton.setAttribute('aria-pressed','false');
+    theaterButton.addEventListener('click',()=>{void toggleCinema()});
     resetButton=document.createElement('button');
     resetButton.type='button';resetButton.textContent='RESET';
     resetButton.setAttribute('aria-label','Reset 3D visualizer preferences');
@@ -161,10 +191,10 @@
     status.setAttribute('role','status');
     status.textContent='3D ready';
     status.style.cssText='font:10px system-ui;color:#d8b5ff;text-shadow:0 1px 2px black';
-    for(const input of [selector,qualitySelect,themeSelect,motionSelect,adaptiveButton,statsButton,resetButton]){
+    for(const input of [selector,qualitySelect,themeSelect,motionSelect,adaptiveButton,statsButton,resetButton,theaterButton]){
       input.style.cssText='color:#f2d9ff;background:#180d25;border:1px solid #9851c4;border-radius:7px;font:11px system-ui;padding:6px;max-width:170px';
     }
-    controls.append(selector,qualitySelect,themeSelect,motionSelect,adaptiveButton,statsButton,resetButton,stats,status);
+    controls.append(selector,qualitySelect,themeSelect,motionSelect,adaptiveButton,statsButton,resetButton,theaterButton,stats,status);
     // The React player already supplies a fullscreen control. The classic
     // player gets the same affordance without modifying its legacy layout.
     if (!parent.querySelector?.('.visualizer-fullscreen')) {
@@ -255,7 +285,13 @@
     gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
   }
   function loop(time){
-    window.requestAnimationFrame(loop);
+    document.addEventListener('fullscreenchange',syncCinema);
+  // Fullscreen belongs to the stage only; the media library, transport,
+  // Nova and radio controls are never reparented or restarted.
+  const cinemaStyle=document.createElement('style');
+  cinemaStyle.textContent='#mediaStage:fullscreen{width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;background:#06020c!important;overflow:hidden!important}#mediaStage:fullscreen #spider3dCanvas{width:100%!important;height:100%!important}#mediaStage:fullscreen #spider3dControls{z-index:999!important;max-width:calc(100% - 32px)!important}';
+  (document.head||document.documentElement)?.append(cinemaStyle);
+  window.requestAnimationFrame(loop);
     if(!findStage())return;
     const snapshot=window.__spiderVisualizerSnapshot?.();
     if(!snapshot)return;
@@ -272,6 +308,7 @@
     motionSelect.hidden=!is3d;
     adaptiveButton.hidden=!is3d;
     resetButton.hidden=!is3d;
+    theaterButton.hidden=!visible;
     statsButton.hidden=!is3d;
     stats.hidden=!is3d||!settings.showStats;
     status.hidden=!is3d;
@@ -279,6 +316,7 @@
     const fps=snapshot.lightweight?Math.min(QUALITY[quality].fps,15):QUALITY[quality].fps;
     if(time-lastFrame<1000/fps)return;
     lastFrame=time;
+    syncCinema();
     const bounds=stage.getBoundingClientRect();
     if(bounds.width<2||bounds.height<2)return;
     // Only sample audio at the actual, throttled render frequency.
@@ -302,6 +340,10 @@
   document.addEventListener('keydown',event=>{
     if(!event.shiftKey||event.altKey||event.ctrlKey||event.metaKey||event.repeat)return;
     if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)||document.activeElement?.isContentEditable)return;
+    if(event.key.toLowerCase()==='f' && window.__spiderVisualizerSnapshot?.().mode?.startsWith('3d-')){
+      event.preventDefault();
+      void toggleCinema();
+    }
     if(event.key.toLowerCase()==='v'){
       event.preventDefault();
       const current=window.__spiderVisualizerSnapshot?.().mode;
@@ -323,7 +365,7 @@
     diagnostics:()=>Object.freeze({mode:window.__spiderVisualizerSnapshot?.().mode||'unknown',
       quality,theme:settings.theme,motion:settings.motion,
       resolution:canvas?{width:canvas.width,height:canvas.height}:null,
-      governor:governor.snapshot(),webglActive:!!gpu,contextLost}),
+      governor:governor.snapshot(),webglActive:!!gpu,contextLost,cinema:cinemaActive()}),
     reset:()=>{
       settings=performanceKit.sanitize();
       selectQuality('balanced');selectTheme('purple');selectMotion('full');

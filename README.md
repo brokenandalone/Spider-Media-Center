@@ -39,6 +39,18 @@ The current repository includes the working Media Center baseline plus the Linux
 - Linux media keys
 - Local Linux speech fallback through espeak-ng
 
+## Immersive fullscreen cinema mode (next upgrade)
+
+Select a 3D scene and press the **CINEMA** control to expand the
+media stage into native fullscreen without replacing the player,
+moving the audio graph or restarting BCN/Nova. The button switches to
+**EXIT CINEMA** when active. **Shift+F** is the keyboard shortcut
+outside text inputs, and Escape exits using the operating system's
+standard fullscreen handling. The control is intentionally unavailable
+in 2D mode. Unsupported fullscreen requests display a notice and
+leave playback alone. Native Spider OS GPU verification is still
+required before installing this next round.
+
 ## Immersive performance studio upgrade (development branch)
 
 Spider's local 3D visualizer now has five live color palettes

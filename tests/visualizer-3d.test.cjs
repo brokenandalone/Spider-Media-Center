@@ -197,7 +197,7 @@ test('visualizer color, motion and performance HUD are adjustable without replac
   const h=harness();
   h.frame(100);
   const controls=h.stage.children.find(e=>e.id==='spider3dControls');
-  const [mode,quality,theme,motion,adaptiveButton,statsButton,resetButton,stats]=controls.children;
+  const [mode,quality,theme,motion,adaptiveButton,statsButton,resetButton,theaterButton,stats]=controls.children;
   assert.equal(theme.attributes['aria-label'],'3D visualizer color theme');
   assert.equal(motion.attributes['aria-label'],'3D visualizer motion');
   theme.value='crimson';theme.events.change();
@@ -229,4 +229,55 @@ test('3D layer restores legacy 2D canvas visibility on switching modes',()=>{
   h.window.__spiderPlayerEngine.setVisualizerMode('web');
   h.frame(200);
   assert.equal(classic.style.visibility,'visible');
+});
+
+test('cinema mode has an accessible control, fullscreen scoped to the visualizer stage',async()=>{
+  const h=harness();
+  h.document.fullscreenElement=null;
+  h.stage.requestFullscreen=async()=>{h.document.fullscreenElement=h.stage;};
+  h.document.exitFullscreen=async()=>{h.document.fullscreenElement=null;};
+  h.frame(100);
+  const controls=h.stage.children.find(e=>e.id==='spider3dControls');
+  const cinema=controls.children.find(e=>e.attributes['aria-label']==='Toggle immersive fullscreen 3D cinema');
+  assert.ok(cinema);
+  assert.equal(cinema.attributes['aria-pressed'],'false');
+  cinema.events.click();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(h.document.fullscreenElement,h.stage);
+  h.frame(200);
+  assert.equal(cinema.textContent,'EXIT CINEMA');
+  assert.equal(h.window.__spider3dControls.diagnostics().cinema,true);
+  cinema.events.click();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(h.document.fullscreenElement,null);
+  h.frame(300);
+  assert.equal(cinema.textContent,'CINEMA');
+  assert.equal(h.window.__spider3dControls.diagnostics().cinema,false);
+});
+
+test('cinema is not activated in 2D mode or by a hidden media stage',async()=>{
+  const h=harness();
+  let entered=0;
+  h.stage.requestFullscreen=async()=>{entered++;};
+  h.frame(100);
+  h.window.__spiderPlayerEngine.setVisualizerMode('web');
+  h.frame(200);
+  const cinema=h.stage.children.find(e=>e.id==='spider3dControls').children.find(e=>e.attributes['aria-label']==='Toggle immersive fullscreen 3D cinema');
+  assert.equal(cinema.hidden,true);
+  cinema.events.click();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(entered,0);
+});
+
+test('cinema refuses fullscreen while video is occupying the media stage',async()=>{
+  const h=harness();
+  let entered=0;
+  h.stage.requestFullscreen=async()=>{entered++;};
+  h.window.__spiderVisualizerSnapshot=()=>({mode:'3d-tunnel',isVideo:true,playing:true,lightweight:false,bands:new Uint8Array(1024)});
+  h.frame(100);
+  const cinema=h.stage.children.find(e=>e.id==='spider3dControls').children.find(e=>e.attributes['aria-label']==='Toggle immersive fullscreen 3D cinema');
+  assert.equal(cinema.hidden,true);
+  cinema.events.click();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(entered,0);
 });

@@ -6,10 +6,10 @@ It is being rebuilt from the known-good **Spider Media Player 7.5.0 “Kabel”*
 
 ## Current status
 
-**Version:** 1.0.0  
+**Version:** 5.0.0  
 **Platform focus:** Linux / Spider OS  
 **Desktop stack:** Electron + React  
-**Baseline:** Spider Media Player 7.5.0 “Kabel”
+**Baseline:** Spider Media Player 7.5.0 “Kabel” / V5.0 compatibility layer
 
 The current repository includes the working Media Center baseline plus the Linux and Spider Radio fixes completed during the 1.0 migration.
 
@@ -300,7 +300,6 @@ Keeping them separate allows Media Center to be developed, tested, packaged, and
 ## License
 
 No license has been selected yet. Until a license is added, normal copyright restrictions apply.
-
 
 ## Playback reliability and local movie compatibility
 

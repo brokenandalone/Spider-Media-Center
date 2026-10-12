@@ -38,7 +38,7 @@ try {
     const name = path.relative(stage, file).split(path.sep).join('/');
     if (hash(extractFile(archive, name)) !== hash(fs.readFileSync(file))) throw new Error('Archive mismatch: ' + name);
   }
-  for (const name of [...runtime.map(n => 'electron/' + n), 'dist/index.html', 'dist/media-center-upgrades.js', 'dist/visualizer-3d-shaders.js', 'dist/visualizer-performance.js', 'dist/visualizer-presets.js', 'dist/visualizer-3d.js', 'assets/icon-512.png', 'package.json']) {
+  for (const name of [...runtime.map(n => 'electron/' + n), 'dist/index.html', 'dist/media-center-upgrades.js', 'dist/playlist-workshop-core.js', 'dist/playlist-workshop.js', 'dist/playlist-workshop.css', 'dist/visualizer-3d-shaders.js', 'dist/visualizer-performance.js', 'dist/visualizer-presets.js', 'dist/visualizer-3d.js', 'assets/icon-512.png', 'package.json']) {
     if (hash(extractFile(archive, name)) !== hash(fs.readFileSync(path.join(stage, name)))) throw new Error('Archive mismatch: ' + name);
   }
   const entries = listPackage(archive);
@@ -72,7 +72,8 @@ try {
       'repeatable installer and rollback packaging',
       'V7 WebGL visualizer with eight cinematic presets and 12 custom slots',
       'optional auto-scene rotation, cinema fullscreen and adaptive GPU diagnostics',
-      'separate opt-in preview installer preserving V6 and native Nova'
+      'separate opt-in preview installer preserving V6 and native Nova',
+      'bulk playlist selection, editing, import/export and BCN show rundown generator'
     ],
     sourceRevision: revision,
     node: process.version,

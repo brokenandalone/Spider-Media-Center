@@ -35,6 +35,11 @@
         throw new Error('Song changed before Nova completed the DJ break');
       }
       window.__spiderLastDjTalkOver = result.talkOver || null;
+      window.dispatchEvent(new CustomEvent('spider:nova-voice-used',{
+        detail:{engine:result.voiceEngine||'unverified',
+          requested:result.voiceProfileRequested||request.context.voiceProfile,
+          fallback:result.voiceFallback===true}
+      }));
       return new Response(JSON.stringify(result), {
         status: 200, headers: { 'Content-Type': 'application/json' }
       });
@@ -781,14 +786,26 @@
       novaStatus.textContent='Nova voice set to '+novaVoice.options[novaVoice.selectedIndex].text+'. Changes apply to the next DJ break.';
     });
     const novaVoiceAvailability=el('p',{className:'bcn-muted',text:'Voice availability is checked through the native Nova service.'});
+    const novaRealVoice=el('p',{className:'bcn-muted',text:'Last on-air neural voice: not verified yet. No robotic fallback is permitted in the new native Nova service.'});
+    window.addEventListener('spider:nova-voice-used',event=>{
+      const item=event.detail||{};
+      novaRealVoice.textContent='Last Nova break: '+String(item.engine||'unknown')+
+        (item.fallback?' (fallback from '+String(item.requested||'selected voice')+')':'')+
+        '. This confirms what produced the audio, not merely the selected option.';
+    });
     const refreshNovaVoices=async()=>{
       try{
         const result=await window.spider.novaVoices();
         novaVoiceAvailability.textContent=result.piperReady
-          ?'Webbie Australian Piper voices are ready. Available: '+result.voices.join(', ')+'.'
-          :'Australian Piper voice model is not installed for this user. Nova can fall back to Natasha or eSpeak.';
+          ?'Webbie Australian Piper model found. Available profiles: '+result.voices.join(', ')+'.'
+          :'Australian Piper model is missing or not executable for this user. Check Webbie voice installation. Natasha may work online.';
+        novaRealVoice.textContent=result.lastVoice?.error
+          ?'Neural synthesis failed: '+result.lastVoice.error+'. Music continues; robot voice is not used.'
+          :'Last voice: '+(result.lastVoice?.engine||'none yet')+
+            (result.lastVoice?.usedFallback?' (used neural fallback)':'')+
+            (result.robotVoiceAllowed?' WARNING: old Nova service still allows robotic backup.':' · robotic fallback disabled.');
       }catch{
-        novaVoiceAvailability.textContent='Native Nova voice update not installed yet. Existing Natasha/eSpeak continues working.';
+        novaVoiceAvailability.textContent='Could not query native Nova voices. Confirm the paired Nova update is installed and service is running.';
       }
     };
     const refreshNova = async () => {
@@ -811,6 +828,33 @@
     // Scheduling changes Nova's spoken context but NEVER launches broadcasting.
     const showStatus = el('p', { className: 'bcn-muted', text: 'Show schedule uses Spider OS local time.' });
     const showList = el('div', { className: 'bcn-results' });
+    const programStatus = el('p',{className:'bcn-muted',text:'Generated shows saved in Playlist Workshop appear here before you schedule a day and time.'});
+    const programList = el('div',{className:'bcn-results'});
+    const legacyStatus=el('p',{className:'bcn-muted',text:'Checking older one-off AutoDJ schedule…'});
+    let legacyDisarmed=false;
+    const updateLegacyStatus=()=>{
+      const legacy=window.__spiderLegacyOneOffScheduler;
+      const entries=legacy?.list?.()||[];
+      legacyStatus.textContent=entries.length
+        ? entries.length+' legacy one-off AutoDJ event(s) are stored separately from BCN Show Clock. '+
+          (legacyDisarmed?'Legacy timers are stopped this session.':'Their old timers may still trigger AutoDJ. Review them before using the BCN schedule.')
+        :'No legacy one-off AutoDJ events found. BCN Media is the source of truth for new weekly programming.';
+    };
+    const stopLegacy=el('button',{type:'button',className:'bcn-small-button',
+      text:'Stop legacy one-off timers this session',onclick:()=>{
+        const legacy=window.__spiderLegacyOneOffScheduler;
+        if(!legacy?.stop){legacyStatus.textContent='Legacy scheduler is still loading.';return;}
+        if(!window.confirm('Stop OLD one-off AutoDJ schedule timers for this app session? Entries are preserved. BCN weekly programming is unchanged.'))return;
+        legacy.stop();
+        legacyDisarmed=true;
+        updateLegacyStatus();
+      }});
+    const selectedProgram = el('select',{'aria-label':'Generated BCN show playlist'});
+    selectedProgram.append(el('option',{value:'',text:'Manual spoken show (no playlist linked)'}));
+    selectedProgram.addEventListener('change',()=>{
+      const chosen=selectedProgram.options[selectedProgram.selectedIndex];
+      if(chosen?.dataset?.name)showName.value=chosen.dataset.name;
+    });
     const requestStatus = el('p', { className: 'bcn-muted', text: 'Only approved entries can be spoken by Nova.' });
     let listenerIntakeEnabled = false;
     const listenerIntakeButton = el('button', {
@@ -855,6 +899,41 @@
         : 'No scheduled show is active. Next: ' +
           (next ? next.name + ' (' + snapshot.days[next.day] + ' ' + next.start + ')' : 'nothing scheduled') +
           '. Time zone: ' + snapshot.timeZone;
+      const programs=Array.isArray(snapshot.programs)?snapshot.programs:[];
+      const preferred=selectedProgram.value;
+      selectedProgram.replaceChildren(el('option',{value:'',text:'Manual spoken show (no playlist linked)'}));
+      programList.replaceChildren();
+      if(!programs.length)programList.append(el('p',{className:'bcn-muted',text:'No generated shows registered. Open Playlist Workshop, generate a show, then select Save show to BCN Scheduler.'}));
+      programs.forEach(program=>{
+        const option=el('option',{value:program.id,text:program.name+' · '+program.trackCount+' songs'});
+        option.dataset.name=program.name;
+        selectedProgram.append(option);
+        const scheduled=(program.scheduledBlocks||[]).length;
+        const remove=el('button',{className:'bcn-small-button',type:'button',text:'Remove draft',onclick:async()=>{
+          if(scheduled)return;
+          if(!window.confirm('Remove this show from BCN programming? The music playlist remains in AutoDJ.'))return;
+          try{renderProgramming(await window.spider.bcnRemoveProgram(program.id));}
+          catch(e){programStatus.textContent=e?.message||String(e);}
+        }});
+        remove.disabled=Boolean(scheduled);
+        const play=el('button',{className:'bcn-small-button',type:'button',text:'Start playlist manually',onclick:()=>{
+          try{
+            const dj=window.__spiderAutoDJ;
+            if(!dj?.start)throw Error('AutoDJ is not ready.');
+            const saved=dj.listPlaylists().find(p=>String(p.id)===program.playlistId);
+            if(!saved?.tracks?.length)throw Error('The show playlist is missing or empty. Open Playlist Workshop to repair it.');
+            if(!window.confirm('Start AutoDJ using '+program.name+'? This does not start a public BCN broadcast.'))return;
+            dj.start(saved.id);
+            programStatus.textContent='AutoDJ armed for '+program.name+'. Public broadcast state unchanged.';
+          }catch(e){programStatus.textContent=e?.message||String(e);}
+        }});
+        programList.append(el('div',{className:'bcn-result-card'},
+          el('span',{text:program.name+' · '+program.trackCount+' tracks · '+program.durationMinutes+' min · '+
+            (scheduled?scheduled+' scheduled block(s)':'NOT SCHEDULED')}),el('div',{className:'bcn-result-actions'},play,remove)));
+      });
+      if([...selectedProgram.options].some(o=>o.value===preferred))selectedProgram.value=preferred;
+      programStatus.textContent=programs.length+' generated BCN show(s). Scheduling changes Nova show identity only; it does not automatically start music or broadcasting.';
+      updateLegacyStatus();
       showList.replaceChildren();
       if (!snapshot.shows.length) showList.append(el('p', { className: 'bcn-muted', text: 'No shows scheduled yet.' }));
       snapshot.shows.forEach(show => {
@@ -903,6 +982,7 @@
       try { renderProgramming(await window.spider.bcnDeskState()); }
       catch (error) { showStatus.textContent = 'BCN desk unavailable: ' + (error?.message || String(error)); }
     };
+    window.addEventListener('spider:bcn-program-changed',refreshProgramming);
     const addShowButton = el('button', {
       type: 'button', className: 'bcn-small-button', text: 'Schedule show',
       onclick: async () => {
@@ -910,7 +990,8 @@
         try {
           renderProgramming(await window.spider.bcnAddShow({
             day: Number(showDay.value), start: showStart.value, end: showEnd.value,
-            name: showName.value, tone: showTone.value
+            name: showName.value, tone: showTone.value,
+            programId:selectedProgram.value || undefined
           }));
           showName.value = '';
         } catch (error) { showStatus.textContent = error?.message || String(error); }
@@ -998,7 +1079,8 @@
         novaStatus,
         el('div',{className:'bcn-row'},novaVoice,checkNova),
         novaVoiceAvailability,
-        el('button',{type:'button',className:'bcn-small-button',text:'Check Australian voices',onclick:refreshNovaVoices})
+        novaRealVoice,
+        el('button',{type:'button',className:'bcn-small-button',text:'Check actual voice engine',onclick:refreshNovaVoices})
       ),
       el('div', { className: 'bcn-section' },
         el('h3', { text: 'BCN Continuity Guard' }),
@@ -1013,6 +1095,12 @@
         el('h3', { text: 'BCN Show Clock' }),
         el('p', { className: 'bcn-muted', text: 'Set Nova’s on-air show identity by Spider OS local time. Scheduling announcements does not start or stop a public broadcast. Split overnight blocks at midnight.' }),
         showStatus,
+        programStatus,
+        programList,
+        el('h3',{text:'Legacy AutoDJ Schedule (separate, for review)'}),
+        legacyStatus,
+        stopLegacy,
+        el('div',{className:'bcn-row'},selectedProgram),
         el('div', { className: 'bcn-row' }, showDay, showStart, showEnd, showName, showTone, addShowButton),
         showList
       ),

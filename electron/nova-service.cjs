@@ -90,7 +90,11 @@ function nativeNova(options = {}) {
       const names = ['auto','natasha','matilda','kirra','bindi','marlo','tully','willow'];
       const available = Array.isArray(result.voices) ? result.voices.filter(value => names.includes(value)) : [];
       return {voices:available,selected:names.includes(result.selected)?result.selected:'auto',
-        piperReady:result.piperReady===true,fallback:String(result.fallback||'')};
+        piperReady:result.piperReady===true,fallback:String(result.fallback||''),
+        lastVoice:result.lastVoice && typeof result.lastVoice==='object'
+          ? {engine:String(result.lastVoice.engine||''),usedFallback:result.lastVoice.usedFallback===true,
+             error:String(result.lastVoice.error||'').slice(0,300)} : null,
+        robotVoiceAllowed:result.robotVoiceAllowed===true};
     },
     async prepare(payload) {
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
@@ -142,6 +146,9 @@ function nativeNova(options = {}) {
       return {
         id: String(reply.id || '').slice(0, 100),
         type,
+        voiceEngine: String(reply.voiceEngine||'unverified').slice(0,40),
+        voiceProfileRequested:String(reply.voiceProfileRequested||'').slice(0,40),
+        voiceFallback:reply.voiceFallback===true,
         script: String(reply.script || '').slice(0, 1200),
         audioFile: audio,
         talkOver: reply.talkOver && typeof reply.talkOver === 'object'

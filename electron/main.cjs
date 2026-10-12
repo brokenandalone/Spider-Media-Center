@@ -1259,6 +1259,14 @@ ipcMain.handle('bcn:desk-state', (event) => {
   trustedMediaSender(event);
   return programmingDesk().state();
 });
+ipcMain.handle('bcn:program-register', (event, value) => {
+  trustedMediaSender(event);
+  return programmingDesk().registerProgram(value);
+});
+ipcMain.handle('bcn:program-remove', (event, id) => {
+  trustedMediaSender(event);
+  return programmingDesk().removeProgram(id);
+});
 ipcMain.handle('bcn:desk-add-show', (event, value) => {
   trustedMediaSender(event);
   return programmingDesk().addShow(value);

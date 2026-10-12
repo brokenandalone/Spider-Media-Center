@@ -148,12 +148,22 @@
    $('pw-save-show').disabled=!result.tracks.length;
    notify(result.count?'Generated rundown. Save it to create a real AutoDJ playlist.':result.warning,!result.count);
  }
- function saveGenerated(){
+ async function saveGenerated(){
    const result=state.draft;if(!result?.tracks.length)return notify('Generate a show with music first.',true);
+   if(typeof window.spider?.bcnRegisterProgram!=='function')throw Error('Native BCN programming desk is unavailable. Your show was not saved. Install the programming integration first.');
    const p=create(result.name);
    dj().savePlaylist({...p,tracks:result.tracks.map(t=>({...t,weight:1,kind:'music'}))});
    saveShow(p.id,result);refreshPlaylists();
-   notify('Saved '+result.name+' as an AutoDJ playlist. Cues are saved in its rundown, never in the audio queue.');
+   try {
+     await window.spider.bcnRegisterProgram({
+       name:result.name,playlistId:String(p.id),durationMinutes:result.durationMinutes,
+       trackCount:result.tracks.length,tone:'natural'
+     });
+     window.dispatchEvent(new Event('spider:bcn-program-changed'));
+     notify('Saved '+result.name+' to AutoDJ and BCN Media > Show Scheduler. Choose a day and time in BCN Media to schedule the show. No broadcast was started.');
+   } catch(error) {
+     notify('The playlist was saved, but BCN registration failed: '+(error?.message||String(error))+'. Open BCN Media to check, then retry.',true);
+   }
  }
 
  async function scanInvalidMusic(){
@@ -313,12 +323,17 @@
    form.append(field('Show name',showName),field('Show duration',length),field('Music source',source),field('Optional filter',theme),
      field('Songs between DJ breaks',breaks),field('Estimated song length (min)',avg),field('Rotation variation',seed));
    const strict=input('checkbox');strict.id='pw-strict';const repeat=input('checkbox');repeat.id='pw-repeat';
-   const save=btn('Save to AutoDJ playlists',()=>{try{saveGenerated();}catch(e){notify(e.message,true);}},'pw-emphasis');save.id='pw-save-show';save.disabled=true;
+   const save=btn('Save show to BCN Scheduler',()=>saveGenerated().catch(e=>notify(e.message,true)),'pw-emphasis');save.id='pw-save-show';save.disabled=true;
    const lines=dom('div','pw-rundown');lines.id='pw-rundown';
    generator.append(form,row(field('Strict music filter',strict),field('Allow repeats for short libraries',repeat)),
      row(btn('Generate show',()=>{try{generate();}catch(e){notify(e.message,true);}},'pw-emphasis'),save,
        btn('Export draft rundown',()=>state.draft?download(Core.rundownText(state.draft),state.draft.name+'-rundown.txt'):notify('Generate a show first.',true)),
        btn('Append draft music to queue',()=>state.draft&&queue(state.draft.tracks).catch(e=>notify(e.message,true)))),lines);
+   generator.append(row(btn('Open BCN show scheduler',()=>{
+     panel.hidden=true;
+     const trigger=document.getElementById('bcnMediaLauncher');
+     if(trigger)trigger.click();else notify('BCN Media controls are still loading.',true);
+   })));
    panel.append(generator);
    const cleaner=dom('section','pw-card pw-generator');
    cleaner.append(dom('h3','','4. Music Library Cleanup'),

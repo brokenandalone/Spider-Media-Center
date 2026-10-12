@@ -129,7 +129,7 @@
      name:$('pw-show-name').value,durationMinutes:Number($('pw-length').value),
      averageTrackMinutes:Number($('pw-average').value),breakEvery:Number($('pw-breaks').value),
      theme:$('pw-theme').value,requireTheme:$('pw-strict').checked,
-     allowRepeats:$('pw-repeat').checked,seed:$('pw-show-name').value+':'+$('pw-seed').value,library:tracks
+     allowRepeats:$('pw-repeat').checked,seed:$('pw-show-name').value+':'+$('pw-seed').value,library:tracks,bcnOnly:true
    });
    state.draft=result;
    const box=$('pw-rundown');box.replaceChildren();
@@ -195,7 +195,7 @@
    grid.append(left,right);panel.append(grid);
    const generator=dom('section','pw-card pw-generator');
    generator.append(dom('h3','','3. BCN Show Playlist Generator'),
-     dom('p','pw-muted','Generate show rotations and Nova cue sheets. This does not start a broadcast or schedule an unattended stream.'));
+     dom('p','pw-muted','BCN-only music: Broken Sorrow, Therapy and Sonz, Justin Therapy, and J-Cold. Songs without matching artist credits are excluded. This does not start a broadcast or schedule an unattended stream.'));
    const form=dom('div','pw-form');
    const showName=input('text','BCN Midnight Signal');showName.id='pw-show-name';showName.maxLength=90;
    const length=document.createElement('select');length.id='pw-length';for(const n of [30,60,90,120,180,240])length.add(new Option(n+' minutes',n));length.value='60';

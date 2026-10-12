@@ -75,7 +75,7 @@ try {
       'separate opt-in preview installer preserving V6 and native Nova',
       'bulk playlist selection, editing, import/export and BCN show rundown generator',
       'Australian neural Nova voices with Webbie Piper and Natasha/eSpeak recovery',
-      'BCN four-artist cue rotation when no saved show playlist is selected',
+      'BCN cue rotation with a temporary Unknown Artist allowance for untagged music',
       'missing-media library cleanup with verified snapshots and no file deletion'
     ],
     sourceRevision: revision,

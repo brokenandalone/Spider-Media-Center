@@ -1057,6 +1057,10 @@
             productionStatus.textContent=item.title+' queued by the operator. No automatic spot scheduling was enabled.';
           }});
           const remove=el('button',{type:'button',className:'bcn-small-button',text:'Delete saved spot',onclick:async()=>{
+            const queueItems=(window.__spiderPlayerBridge||window.__spiderPlayerEngine)?.getQueueSnapshot?.()?.queue||[];
+            if(queueItems.some(track=>track?.url===item.url)){
+              productionStatus.textContent='Remove this spot from Up Next before deleting its audio, or the queue will contain a missing file.';return;
+            }
             if(!window.confirm('Permanently remove this recorded BCN spot? This does not delete any source music.'))return;
             try{await window.spider.bcnProductionRemove(item.id);await refreshProductionLibrary();}
             catch(e){productionStatus.textContent=e?.message||String(e);}

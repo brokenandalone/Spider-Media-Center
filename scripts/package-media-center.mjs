@@ -14,7 +14,7 @@ const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'spider-media-build-'));
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const runtime = ['main.cjs', 'preload.cjs', 'renderer.js', 'renderer.audio.js',
   'renderer.bridge.js', 'network-directory.cjs', 'media-compatibility.cjs', 'nova-service.cjs', 'bcn-desk.cjs', 'bcn-prepare-queue.cjs', 'bcn-listener-intake.cjs', 'radio-telemetry.cjs', 'radio-recovery.cjs', 'radio-relay-probe.cjs',
-  'player.html', 'offline.html', 'styles.css'];
+  'player.html', 'offline.html', 'styles.css', 'music-library-audit.cjs'];
 try {
   fs.mkdirSync(output, { recursive: true });
   fs.mkdirSync(path.join(stage, 'electron'));
@@ -73,7 +73,10 @@ try {
       'V7 WebGL visualizer with eight cinematic presets and 12 custom slots',
       'optional auto-scene rotation, cinema fullscreen and adaptive GPU diagnostics',
       'separate opt-in preview installer preserving V6 and native Nova',
-      'bulk playlist selection, editing, import/export and BCN show rundown generator'
+      'bulk playlist selection, editing, import/export and BCN show rundown generator',
+      'Australian neural Nova voices with Webbie Piper and Natasha/eSpeak recovery',
+      'BCN four-artist cue rotation when no saved show playlist is selected',
+      'missing-media library cleanup with verified snapshots and no file deletion'
     ],
     sourceRevision: revision,
     node: process.version,

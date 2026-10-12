@@ -26,6 +26,15 @@ Imported JSON playlist files require real existing playable URLs; if you move fi
 
 If duration metadata is missing, the show runtime is an estimate. If the source library is too small to fill the time without repeats, a warning appears. The builder never falsely claims that it created a continuous 24/7 cloud broadcast.
 
+
+## Up Next queue cleanup (Spider Media Center, not the public website)
+
+A visible **CLEAR UP NEXT** action on the Media Center desktop and an **Up Next · Queue Cleanup** section inside **BCN MEDIA** let the operator remove queued songs without deleting their music. When a song is playing, **Clear upcoming (keep playing)** keeps that exact song and drops every other queued row, including stale/blank "ghost" entries. With nothing playing, it clears the queued songs. **REMOVE BLANK ROWS** removes only queue records with no playable URL and does **not** discard legitimate tracks just because their artist is `Unknown Artist` or their title is missing.
+
+The **Clear entire queue** option stops playback and clears even the current song; it is blocked while BCN is on air. Clearing upcoming during a live broadcast requires an explicit confirmation because it stops AutoDJ and leaves nothing after the current song. A pending Nova transition and preloaded standby deck are cleared, repeat rotation is turned off, and the new queue is persisted to `spider-player-state-v2` so removed tracks don't reappear after restarting the app. This does not alter files, the indexed music library, or saved show playlists.
+
+If a blank song is present inside a previously saved playlist, use **Music Library Cleanup > Scan invalid entries** with playlist cleanup enabled after stopping BCN and AutoDJ; queue cleanup does not delete or rewrite saved playlists.
+
 ## Library cleanup
 
 Click **PLAYLIST WORKSHOP > Music Library Cleanup > Scan invalid entries** to review stale local file references, such as deleted media, empty files, broken `file://` links or unsupported formats. The report separates valid, invalid, network/stream and inaccessible entries. Temporarily disconnected removable drives should be reconnected before cleanup because missing paths will be reported as missing. The operator must confirm **Clear invalid stored entries**. AutoDJ and BCN broadcasting must be stopped before any cleanup. The app first writes a private JSON recovery snapshot under the Electron user-data directory in `library-cleanup-backups`. If backup fails, it will not clear any stored references. Actual audio files are never deleted.

@@ -219,17 +219,26 @@
 
   // Session-only cue rotation: never writes or publishes a playlist.
   const CUE_ID='bcn-live-cue-session';
+  const UNKNOWN_BCN_SETTING='spider.bcn.allowUnknownArtist.v1';
+  const allowUnknownBcn=()=>{
+    try{return localStorage.getItem(UNKNOWN_BCN_SETTING)!=='off';}
+    catch{return true;}
+  };
+  const setUnknownBcn=enabled=>{
+    try{localStorage.setItem(UNKNOWN_BCN_SETTING,enabled?'on':'off');}catch{}
+    window.dispatchEvent(new Event('spider:bcn-unknown-change'));
+  };
   function cueEligibleTracks(bridge) {
     const isBcn=window.SpiderPlaylistWorkshopCore?.isBcnArtist;
     return (bridge?.getQueueSnapshot?.()?.queue||[]).filter(t=>
       t?.url && t?.kind!=='commercial' && t?.kind!=='shoutout' &&
-      typeof isBcn==='function' && isBcn(t.artist) &&
+      typeof isBcn==='function' && isBcn(t.artist,{allowUnknown:allowUnknownBcn()}) &&
       !/\.(mp4|mkv|avi|mov|webm|wmv)(?:[?#]|$)/i.test(t.url));
   }
   function startCueAutoDJ(dj,bridge) {
     if(!dj||!bridge)throw Error('AutoDJ is not ready.');
     const tracks=cueEligibleTracks(bridge);
-    if(!tracks.length)throw Error('No BCN music in the cue. Queue tracks from Broken Sorrow, Therapy and Sonz, Justin Therapy or J-Cold, with accurate artist metadata.');
+    if(!tracks.length)throw Error('No BCN music in the cue. Queue music by Broken Sorrow, Therapy and Sonz, Justin Therapy, or J-Cold, or enable temporary Unknown Artist support for untagged tracks.');
     // The session cue must never enter saved playlist persistence, even when
     // a user creates another playlist while AutoDJ is running.
     const cue=dj.__bcnCueSession||(dj.__bcnCueSession={
@@ -267,7 +276,7 @@
       dj.__bcnCueRefresh=window.setInterval(()=>{
         if(!dj.isRunning?.()||dj.currentPlaylist?.id!==CUE_ID)return;
         const next=cueEligibleTracks(window.__spiderPlayerBridge);
-        if(next.length){cue.tracks=next.map(t=>({...t,weight:1,kind:'music'}));dj.currentPlaylist=cue;}
+        cue.tracks=next.map(t=>({...t,weight:1,kind:'music'}));dj.currentPlaylist=cue;
       },3000);
     }
     return tracks.length;
@@ -699,6 +708,13 @@
     });
 
 
+    const bcnUnknownToggle=el('input',{type:'checkbox',id:'bcnAllowUnknownArtist','aria-label':'Temporarily allow Unknown Artist music on BCN'});
+    bcnUnknownToggle.checked=allowUnknownBcn();
+    bcnUnknownToggle.addEventListener('change',()=>setUnknownBcn(bcnUnknownToggle.checked));
+    window.addEventListener('spider:bcn-unknown-change',()=>{
+      bcnUnknownToggle.checked=allowUnknownBcn();
+    });
+
     const novaStatus = el('p', { className: 'bcn-muted', text: 'Nova runs through the native Spider OS DJ service.' });
     const novaVoice=el('select',{id:'bcnNovaVoice', 'aria-label':'Nova voice profile'});
     const novaVoices=[
@@ -913,6 +929,10 @@
       ),
       el('div', { className: 'bcn-section' },
         el('h3', { text: 'Nova · Native AI DJ' }),
+        el('label',{className:'bcn-row'},bcnUnknownToggle,
+          el('span',{text:'Temporarily allow Unknown Artist / untagged songs in BCN cue and show generator'})),
+        el('p',{className:'bcn-muted',
+          text:'Only use this until your music tags are corrected. Unknown Artist can represent any song, so review the cue and confirm broadcast rights. Other named artists stay excluded.'}),
         novaStatus,
         el('div',{className:'bcn-row'},novaVoice,checkNova),
         novaVoiceAvailability,

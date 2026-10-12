@@ -66,4 +66,7 @@ test('unscheduled AutoDJ cues approved four-artist music without creating persis
   assert.match(ui,/dj\.start\(CUE_ID\)/);
   assert.doesNotMatch(ui,/dj\.savePlaylist\(cue\)/);
   assert.match(ui,/installCueClickHandler\(\)/);
+  assert.match(ui,/isBcn\(t\.artist,\{allowUnknown:allowUnknownBcn\(\)\}\)/);
+  assert.match(ui,/spider\.bcn\.allowUnknownArtist\.v1/);
+  assert.match(ui,/bcnAllowUnknownArtist/);
 });

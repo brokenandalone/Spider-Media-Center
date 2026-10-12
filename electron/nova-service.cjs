@@ -85,6 +85,13 @@ function nativeNova(options = {}) {
       const reply = await localRequest('GET', '/health');
       return { ok: reply.ok === true, host: 'Nova', service: reply.service || 'Spider AI DJ' };
     },
+    async voices() {
+      const result = await localRequest('GET','/dj/voices');
+      const names = ['auto','natasha','matilda','kirra','bindi','marlo','tully','willow'];
+      const available = Array.isArray(result.voices) ? result.voices.filter(value => names.includes(value)) : [];
+      return {voices:available,selected:names.includes(result.selected)?result.selected:'auto',
+        piperReady:result.piperReady===true,fallback:String(result.fallback||'')};
+    },
     async prepare(payload) {
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
         throw new Error('Invalid Nova request');
@@ -121,7 +128,9 @@ function nativeNova(options = {}) {
           host: 'Nova',
           showName: String(safeContext.showName || '').slice(0, 80),
           segment: String(safeContext.segment || '').slice(0, 80),
-          tone: String(safeContext.tone || '').slice(0, 48)
+          tone: String(safeContext.tone || '').slice(0, 48),
+          voiceProfile: ['auto','natasha','matilda','kirra','bindi','marlo','tully','willow'].includes(String(safeContext.voiceProfile || '').toLowerCase())
+            ? String(safeContext.voiceProfile).toLowerCase() : 'auto'
         },
         request: approved
           ? { approved: true, approvedRequest: String(safeRequest.approvedRequest || '').slice(0, 180) }

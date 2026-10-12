@@ -233,6 +233,27 @@
     let cue=dj.playlists.find(p=>p.id===CUE_ID);
     if(!cue){cue={id:CUE_ID,name:'BCN Live Cue (session only)',tracks:[]};dj.playlists.push(cue);}
     cue.tracks=tracks.map(t=>({...t,weight:1,kind:'music'}));
+    if(!dj.__bcnCueGuardInstalled){
+      const pick=dj._selectNextFromPlaylist.bind(dj);
+      const fallback=dj._selectFallbackTrack.bind(dj);
+      dj._selectNextFromPlaylist=function(playlist=this.currentPlaylist){
+        if(playlist?.id!==CUE_ID)return pick(playlist);
+        const all=cueEligibleTracks(window.__spiderPlayerBridge);
+        if(!all.length)return null;
+        const recent=new Set((this.recentTracks||[]).map(item=>item.key));
+        let options=all.filter(item=>!recent.has(item.url||item.id));
+        if(!options.length)options=all;
+        const last=(this.recentTracks||[]).slice(0,2).map(item=>item.artist);
+        const varied=options.filter(item=>!last.includes(String(item.artist||'').trim().toLowerCase()));
+        if(varied.length)options=varied;
+        return options[Math.floor(Math.random()*options.length)];
+      };
+      dj._selectFallbackTrack=function(){
+        if(this.currentPlaylist?.id===CUE_ID)return null;
+        return fallback();
+      };
+      dj.__bcnCueGuardInstalled=true;
+    }
     dj.start(CUE_ID);
     if(!dj.__bcnCueRefresh){
       dj.__bcnCueRefresh=window.setInterval(()=>{

@@ -4,6 +4,11 @@
  const Core=window.SpiderPlaylistWorkshopCore;
  if(!Core)return;
  const STORE='spider.playlist.workshop.shows.v1';
+ const UNKNOWN_STORE='spider.bcn.allowUnknownArtist.v1';
+ // Default on for the owner's currently untagged collection. Turning it off
+ // restores the strict four-artist filter without changing any media tags.
+ const allowUnknown=()=>{try{return localStorage.getItem(UNKNOWN_STORE)!=='off';}catch{return true;}};
+ const setAllowUnknown=value=>{try{localStorage.setItem(UNKNOWN_STORE,value?'on':'off');}catch{}};
  const state={chosen:new Set(),filter:'',playlistId:'',page:0,draft:null};
  const $=id=>document.getElementById(id);
  const bridge=()=>window.__spiderPlayerBridge||window.__spiderPlayerEngine;
@@ -129,7 +134,7 @@
      name:$('pw-show-name').value,durationMinutes:Number($('pw-length').value),
      averageTrackMinutes:Number($('pw-average').value),breakEvery:Number($('pw-breaks').value),
      theme:$('pw-theme').value,requireTheme:$('pw-strict').checked,
-     allowRepeats:$('pw-repeat').checked,seed:$('pw-show-name').value+':'+$('pw-seed').value,library:tracks,bcnOnly:true
+     allowRepeats:$('pw-repeat').checked,seed:$('pw-show-name').value+':'+$('pw-seed').value,library:tracks,bcnOnly:true,allowUnknownBcn:allowUnknown()
    });
    state.draft=result;
    const box=$('pw-rundown');box.replaceChildren();
@@ -276,7 +281,21 @@
    grid.append(left,right);panel.append(grid);
    const generator=dom('section','pw-card pw-generator');
    generator.append(dom('h3','','3. BCN Show Playlist Generator'),
-     dom('p','pw-muted','BCN-only music: Broken Sorrow, Therapy and Sonz, Justin Therapy, and J-Cold. Songs without matching artist credits are excluded. This does not start a broadcast or schedule an unattended stream.'));
+     dom('p','pw-muted','BCN music: Broken Sorrow, Therapy and Sonz, Justin Therapy and J-Cold. A temporary Unknown Artist exception also lets untagged songs into BCN. Other named artists remain excluded. This does not start a broadcast.'));
+   const unknownToggle=input('checkbox');
+   unknownToggle.id='pw-allow-unknown';
+   unknownToggle.checked=allowUnknown();
+   unknownToggle.addEventListener('change',()=>{
+     setAllowUnknown(unknownToggle.checked);
+     state.draft=null;
+     $('pw-save-show').disabled=true;
+     $('pw-rundown').replaceChildren();
+     notify(unknownToggle.checked
+       ?'Temporary Unknown Artist exception enabled for BCN. Verify which tracks you have permission to broadcast.'
+       :'Unknown Artist exception disabled. Regenerate the show using only the four named artists.');
+   });
+   generator.append(field('Temporarily allow Unknown Artist and empty artist tags on BCN',unknownToggle),
+     dom('p','pw-muted','Turn this off after correcting your music metadata. It permits ALL otherwise eligible untagged tracks, so review the show before broadcasting.'));
    const form=dom('div','pw-form');
    const showName=input('text','BCN Midnight Signal');showName.id='pw-show-name';showName.maxLength=90;
    const length=document.createElement('select');length.id='pw-length';for(const n of [30,60,90,120,180,240])length.add(new Option(n+' minutes',n));length.value='60';

@@ -830,6 +830,25 @@
     const showList = el('div', { className: 'bcn-results' });
     const programStatus = el('p',{className:'bcn-muted',text:'Generated shows saved in Playlist Workshop appear here before you schedule a day and time.'});
     const programList = el('div',{className:'bcn-results'});
+    const legacyStatus=el('p',{className:'bcn-muted',text:'Checking older one-off AutoDJ schedule…'});
+    let legacyDisarmed=false;
+    const updateLegacyStatus=()=>{
+      const legacy=window.__spiderLegacyOneOffScheduler;
+      const entries=legacy?.list?.()||[];
+      legacyStatus.textContent=entries.length
+        ? entries.length+' legacy one-off AutoDJ event(s) are stored separately from BCN Show Clock. '+
+          (legacyDisarmed?'Legacy timers are stopped this session.':'Their old timers may still trigger AutoDJ. Review them before using the BCN schedule.')
+        :'No legacy one-off AutoDJ events found. BCN Media is the source of truth for new weekly programming.';
+    };
+    const stopLegacy=el('button',{type:'button',className:'bcn-small-button',
+      text:'Stop legacy one-off timers this session',onclick:()=>{
+        const legacy=window.__spiderLegacyOneOffScheduler;
+        if(!legacy?.stop){legacyStatus.textContent='Legacy scheduler is still loading.';return;}
+        if(!window.confirm('Stop OLD one-off AutoDJ schedule timers for this app session? Entries are preserved. BCN weekly programming is unchanged.'))return;
+        legacy.stop();
+        legacyDisarmed=true;
+        updateLegacyStatus();
+      }});
     const selectedProgram = el('select',{'aria-label':'Generated BCN show playlist'});
     selectedProgram.append(el('option',{value:'',text:'Manual spoken show (no playlist linked)'}));
     selectedProgram.addEventListener('change',()=>{
@@ -914,6 +933,7 @@
       });
       if([...selectedProgram.options].some(o=>o.value===preferred))selectedProgram.value=preferred;
       programStatus.textContent=programs.length+' generated BCN show(s). Scheduling changes Nova show identity only; it does not automatically start music or broadcasting.';
+      updateLegacyStatus();
       showList.replaceChildren();
       if (!snapshot.shows.length) showList.append(el('p', { className: 'bcn-muted', text: 'No shows scheduled yet.' }));
       snapshot.shows.forEach(show => {
@@ -1077,6 +1097,9 @@
         showStatus,
         programStatus,
         programList,
+        el('h3',{text:'Legacy AutoDJ Schedule (separate, for review)'}),
+        legacyStatus,
+        stopLegacy,
         el('div',{className:'bcn-row'},selectedProgram),
         el('div', { className: 'bcn-row' }, showDay, showStart, showEnd, showName, showTone, addShowButton),
         showList

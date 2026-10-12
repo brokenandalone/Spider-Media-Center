@@ -175,3 +175,23 @@
   #spiderQueueToolbar { top: auto; bottom: 74px; right: 10px; max-width: 156px; }
   #spiderQueueToolbar button { font-size: 9px; padding: 9px 10px; }
 }
+
+/* Nova imaging editor, all production within BCN Media */
+#bcnProductionStudio textarea {
+  display: block;
+  width: 100%;
+  min-height: 84px;
+  margin: 7px 0 13px;
+  box-sizing: border-box;
+  border: 1px solid rgba(194,112,255,.32);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #110a17;
+  color: #f9f3ff;
+  font: 13px/1.55 system-ui,sans-serif;
+  resize: vertical;
+}
+#bcnProductionStudio .bcn-muted { display: block; }
+#bcnProductionStudio textarea:focus-visible { outline: 2px solid #c783ff; }
+#bcnProductionStudio .bcn-row input[type="text"] { flex: 1 1 220px; }
+#bcnProductionStudio input[type="checkbox"] { min-height: auto; }

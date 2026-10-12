@@ -85,8 +85,34 @@ test('BCN owns exactly four artists, including J-Cold, without a genre or outsid
   assert.match(createShow({library:songs,bcnOnly:true}).warning,/J-Cold/);
   assert.ok(createShow({library:songs,bcnOnly:false}).count>0,'Private library rotation stays unrestricted');
 });
-test('BCN show UI always activates four-artist filtering',()=>{
+test('temporary Unknown Artist allowance accepts blank metadata without admitting arbitrary named artists',()=>{
+  // The native file importer records missing artist tags as an empty string.
+  const untagged=[
+    {title:'Imported untagged song',artist:'',url:'file:///media/no-tag.mp3',extension:'mp3',duration:200},
+    {title:'Labelled unknown',artist:'Unknown Artist',url:'file:///media/unknown.mp3',extension:'mp3',duration:200},
+    {title:'Mixed-case placeholder',artist:'  unknown  ARTIST ',url:'file:///media/unknown2.mp3',extension:'mp3',duration:200}
+  ];
+  const other={title:'Outside named artist',artist:'Another Band',url:'file:///media/other.mp3',extension:'mp3',duration:200};
+  assert.equal(isBcnArtist(''),false,'missing artist defaults to strict unless explicitly allowed');
+  assert.equal(isBcnArtist('Unknown Artist'),false,'literal placeholder defaults to strict');
+  assert.equal(isBcnArtist('',{allowUnknown:true}),true);
+  assert.equal(isBcnArtist('Unknown Artist',{allowUnknown:true}),true);
+  assert.equal(isBcnArtist(' uNKNOWN ARTIST ',{allowUnknown:true}),true);
+  assert.equal(isBcnArtist(null,{allowUnknown:true}),true);
+  assert.equal(isBcnArtist('Another Band',{allowUnknown:true}),false);
+  assert.equal(isBcnArtist('Unknown Artist featuring Other Band',{allowUnknown:true}),false);
+  const temporary=createShow({name:'Untagged imports',library:[...untagged,other],
+    durationMinutes:30,bcnOnly:true,allowUnknownBcn:true,seed:'untagged-test'});
+  assert.equal(temporary.count,3);
+  assert.ok(temporary.tracks.every(t=>t.artist===''||/unknown\s*artist/i.test(t.artist)));
+  assert.equal(createShow({library:[...untagged,other],bcnOnly:true}).count,0);
+  assert.equal(createShow({library:[...untagged,other],bcnOnly:true,allowUnknownBcn:false}).count,0);
+});
+
+test('BCN show UI activates four-artist filtering with explicit temporary unknown allowance',()=>{
   const src=fs.readFileSync(path.join(__dirname,'..','dist','playlist-workshop.js'),'utf8');
-  assert.match(src,/library:tracks,bcnOnly:true/);
+  assert.match(src,/library:tracks,bcnOnly:true,allowUnknownBcn:allowUnknown\(\)/);
+  assert.match(src,/spider\.bcn\.allowUnknownArtist\.v1/);
+  assert.match(src,/unknownToggle\.checked=allowUnknown\(\)/);
   for(const artist of BCN_ARTISTS)assert.ok(src.includes(artist));
 });

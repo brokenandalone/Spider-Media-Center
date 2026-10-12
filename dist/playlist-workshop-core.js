@@ -8,11 +8,19 @@
   const AUDIO = new Set(['mp3','flac','m4a','aac','wav','aiff','ogg','opus','wma']);
   const VIDEO = new Set(['mp4','m4v','avi','mkv','mov','mpeg','mpg','wmv','webm']);
   // BCN owns this rotation. The general Media Center library remains unrestricted.
+  // Four permanent credited artists. Missing tags are a separate, temporary
+  // owner-authorized exception because the existing library has not been tagged yet.
   const BCN_ARTISTS = Object.freeze(['Broken Sorrow', 'Therapy and Sonz', 'Justin Therapy', 'J-Cold']);
   const artistKey = artist => String(artist || '').normalize('NFKC').toLowerCase()
     .replace(/[‐‑‒–—−]/g, '-').replace(/[\s-]+/g, '').trim();
   const BCN_ARTIST_KEYS = new Set(BCN_ARTISTS.map(artistKey));
-  const isBcnArtist = artist => BCN_ARTIST_KEYS.has(artistKey(artist));
+  const isUnknownArtist = artist => {
+    const key = artistKey(artist);
+    return key === '' || key === 'unknownartist';
+  };
+  const isBcnArtist = (artist, options = {}) =>
+    BCN_ARTIST_KEYS.has(artistKey(artist)) ||
+    (options.allowUnknown === true && isUnknownArtist(artist));
   const key = t => t ? String(t.url || t.originalUrl || ('id:' + (t.id || ''))).trim() : '';
   function normalize(item) {
     if (!item || typeof item !== 'object' || !String(item.url || '').trim()) return null;
@@ -64,7 +72,7 @@
     const breakMinutes=Math.min(4,Math.max(0,Number(o.breakMinutes)||1));
     const name=String(o.name||'BCN Radio Show').trim().slice(0,90)||'BCN Radio Show';
     const random=rng(o.seed===undefined?name+'|'+target+'|'+(o.theme||''):o.seed);
-    const source=dedupe(o.library).filter(t=>isAudio(t) && (o.bcnOnly !== true || isBcnArtist(t.artist))), filtered=search(source,o.theme||'');
+    const source=dedupe(o.library).filter(t=>isAudio(t) && (o.bcnOnly !== true || isBcnArtist(t.artist,{allowUnknown:o.allowUnknownBcn===true}))), filtered=search(source,o.theme||'');
     const pool=filtered.length?filtered:(o.requireTheme?[]:source);
     const ordered=shuffle(pool,random),tracks=[],rundown=[],recent=[];
     let music=0,talk=0,countSinceBreak=0,remaining=[...ordered];
@@ -88,7 +96,7 @@
     }
     const estimatedMinutes=Number((music+talk).toFixed(1));
     if(tracks.length&&o.includeOutro!==false)rundown.push({type:'cue',label:'SHOW CLOSE / next program tease',atMinute:estimatedMinutes});
-    const warning=!pool.length?(o.bcnOnly===true?'No eligible BCN tracks. Index music credited to Broken Sorrow, Therapy and Sonz, Justin Therapy, or J-Cold; check artist metadata.':'No matching playable audio in the library.'):!tracks.length?'No tracks fit the requested show duration.':
+    const warning=!pool.length?(o.bcnOnly===true?'No eligible BCN tracks. Index music credited to Broken Sorrow, Therapy and Sonz, Justin Therapy or J-Cold. For untagged music, enable the temporary Unknown Artist exception.':'No matching playable audio in the library.'):!tracks.length?'No tracks fit the requested show duration.':
       estimatedMinutes<target-average*1.5?'The music library is too small to fill this show without additional tracks or repeats.':'';
     return {name,durationMinutes:target,estimatedMinutes,count:tracks.length,tracks,rundown,
       complete:estimatedMinutes>=target-average*1.5,warning,
@@ -105,5 +113,5 @@
     lines.push('',show.assumptions||'');if(show.warning)lines.push('WARNING: '+show.warning);
     return lines.join('\n')+'\n';
   }
-  return Object.freeze({key,normalize,isAudio,BCN_ARTISTS,isBcnArtist,dedupe,search,bulkAdd,move,createShow,m3u,rundownText});
+  return Object.freeze({key,normalize,isAudio,BCN_ARTISTS,isUnknownArtist,isBcnArtist,dedupe,search,bulkAdd,move,createShow,m3u,rundownText});
 });

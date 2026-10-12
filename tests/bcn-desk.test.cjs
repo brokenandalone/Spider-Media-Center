@@ -106,6 +106,52 @@ test('BCN schedule and review queue survive a restart with private file permissi
   if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);
 }));
 
+test('generated Workshop shows register as BCN unscheduled programs and can be scheduled with a playlist link',()=>fixture(({desk,file,clock})=>{
+  const a=desk.registerProgram({name:'BCN Nightwatch',playlistId:'1234567890',durationMinutes:60,trackCount:12,tone:'haunting'});
+  assert.equal(a.programs.length,1);
+  assert.equal(a.shows.length,0,'generated shows are drafts until the owner sets a time');
+  assert.equal(a.programs[0].playlistId,'1234567890');
+  const id=a.programs[0].id;
+  const scheduled=desk.addShow({day:0,start:'21:00',end:'22:00',name:'wrong label',programId:id});
+  assert.equal(scheduled.shows.length,1);
+  assert.equal(scheduled.shows[0].programId,id);
+  assert.equal(scheduled.shows[0].name,'BCN Nightwatch');
+  assert.equal(scheduled.programs[0].scheduledBlocks.length,1);
+  assert.throws(()=>desk.removeProgram(id),/scheduled show blocks/);
+  const restored=new BcnDesk({file,clock});
+  assert.equal(restored.state().programs[0].playlistId,'1234567890');
+  assert.equal(restored.state().shows[0].programId,id);
+  restored.removeShow(restored.state().shows[0].id);
+  assert.equal(restored.removeProgram(id).programs.length,0);
+}));
+
+test('program registration is idempotent per saved playlist and validates untrusted user input',()=>fixture(({desk})=>{
+  const p={name:'BCN midnight',playlistId:'2790001',durationMinutes:60,trackCount:18};
+  const first=desk.registerProgram(p).programs[0];
+  const second=desk.registerProgram({...p,name:'BCN midnight updated'}).programs[0];
+  assert.equal(desk.state().programs.length,1);
+  assert.equal(second.id,first.id);
+  assert.equal(second.name,'BCN midnight updated');
+  assert.throws(()=>desk.registerProgram({...p,playlistId:'../../system'}),/saved AutoDJ playlist/);
+  assert.throws(()=>desk.registerProgram({...p,trackCount:0}),/duration and songs/);
+  assert.throws(()=>desk.addShow({day:0,start:'12:00',end:'13:00',name:'fake',programId:'nonexistent'}),/Choose a generated program/);
+}));
+
+test('Workshop Save goes through trusted IPC to BCN desk and scheduler displays draft programs',()=>{
+  const workshop=fs.readFileSync(path.join(__dirname,'..','dist','playlist-workshop.js'),'utf8');
+  const upgrades=fs.readFileSync(path.join(__dirname,'..','dist','media-center-upgrades.js'),'utf8');
+  const preload=fs.readFileSync(path.join(__dirname,'..','electron','preload.cjs'),'utf8');
+  const main=fs.readFileSync(path.join(__dirname,'..','electron','main.cjs'),'utf8');
+  assert.match(workshop,/window\.spider\.bcnRegisterProgram/);
+  assert.match(workshop,/Save show to BCN Scheduler/);
+  assert.match(upgrades,/snapshot\.programs/);
+  assert.match(upgrades,/programId:selectedProgram\.value/);
+  assert.match(upgrades,/Start playlist manually/);
+  assert.match(preload,/bcnRegisterProgram/);
+  assert.match(main,/bcn:program-register/);
+  assert.match(main,/trustedMediaSender\(event\)/);
+});
+
 test('BCN remains an internal operator desk, not an open request API', () => {
   const renderer = fs.readFileSync(path.join(__dirname, '..', 'dist', 'media-center-upgrades.js'), 'utf8');
   const preload = fs.readFileSync(path.join(__dirname, '..', 'electron', 'preload.cjs'), 'utf8');

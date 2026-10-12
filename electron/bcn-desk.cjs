@@ -9,6 +9,7 @@ const crypto = require('node:crypto');
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const MAX_SHOWS = 56;
+const MAX_PROGRAMS = 250;
 const MAX_REQUESTS = 40;
 
 function clean(value, limit) {
@@ -28,7 +29,9 @@ function validateShow(input) {
   const name = clean(input.name, 80);
   if (name.length < 2) throw new Error('Give the show a name');
   const tone = clean(input.tone || 'natural', 48) || 'natural';
-  return { id: crypto.randomUUID(), day, start, end, name, tone };
+  const programId = clean(input.programId || '',64);
+  return { id: crypto.randomUUID(), day, start, end, name, tone,
+    ...(programId ? {programId} : {}) };
 }
 function matchShow(shows, when) {
   const day = when.getDay();
@@ -62,6 +65,7 @@ class BcnDesk {
     this.file = options.file || null;
     this.clock = options.clock || (() => new Date());
     this.shows = [];
+    this.programs = [];
     this.requests = [];
     this.listenerRequestsEnabled = false; // never arm public intake on app restart
     this.lastShowKey = null;
@@ -72,6 +76,17 @@ class BcnDesk {
     try {
       const saved = JSON.parse(fs.readFileSync(this.file, 'utf8'));
       if (!saved || saved.version !== 1) return;
+      this.programs = (Array.isArray(saved.programs) ? saved.programs : []).slice(0,MAX_PROGRAMS)
+        .filter(item=>item && typeof item==='object')
+        .map(item=>({
+          id:clean(item.id,64), name:clean(item.name,80),
+          playlistId:clean(item.playlistId,80),
+          durationMinutes:Math.max(15,Math.min(360,Math.floor(Number(item.durationMinutes)||60))),
+          trackCount:Math.max(0,Math.min(5000,Math.floor(Number(item.trackCount)||0))),
+          tone:clean(item.tone||'natural',48),
+          createdAt:clean(item.createdAt,40),
+          source:'playlist-workshop'
+        })).filter(item=>/^[a-f0-9-]{20,64}$/i.test(item.id) && item.name && item.playlistId);
       const shows = [];
       for (const raw of Array.isArray(saved.shows) ? saved.shows.slice(0, MAX_SHOWS) : []) {
         const value = validateShow(raw);
@@ -99,7 +114,7 @@ class BcnDesk {
     fs.mkdirSync(folder, { recursive: true, mode: 0o700 });
     const temporary = this.file + '.' + process.pid + '.' + crypto.randomBytes(4).toString('hex') + '.tmp';
     try {
-      fs.writeFileSync(temporary, JSON.stringify({ version: 1, shows: this.shows, requests: this.requests }, null, 2) + '\n', { mode: 0o600 });
+      fs.writeFileSync(temporary, JSON.stringify({ version: 1, shows: this.shows, programs: this.programs, requests: this.requests }, null, 2) + '\n', { mode: 0o600 });
       fs.renameSync(temporary, this.file);
     } finally {
       try { fs.unlinkSync(temporary); } catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -115,14 +130,54 @@ class BcnDesk {
       currentShow: current ? { ...current } : null,
       upcomingShow: nextShow(this.shows, now),
       shows: this.shows.map(s => ({ ...s })),
+      programs: this.programs.map(program=>({...program,
+        scheduledBlocks:this.shows.filter(show=>show.programId===program.id).map(show=>show.id)})),
       requests: this.requests.map(r => ({ ...r })),
       listenerRequestsEnabled: this.listenerRequestsEnabled,
       liveBroadcastControlledSeparately: true
     };
   }
+  registerProgram(input) {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Invalid generated BCN program');
+    const name=clean(input.name,80);
+    const playlistId=clean(input.playlistId,80);
+    if(name.length<2 || !playlistId || !/^[a-zA-Z0-9_-]{1,80}$/.test(playlistId))
+      throw new Error('Generated BCN program must have a name and saved AutoDJ playlist');
+    const durationMinutes=Number(input.durationMinutes);
+    const trackCount=Number(input.trackCount);
+    if(!Number.isInteger(durationMinutes)||durationMinutes<15||durationMinutes>360 ||
+       !Number.isInteger(trackCount)||trackCount<1||trackCount>5000)
+      throw new Error('Generated BCN program must have valid duration and songs');
+    const existing=this.programs.find(item=>item.playlistId===playlistId);
+    const program={id:existing?.id||crypto.randomUUID(),name,playlistId,
+      durationMinutes,trackCount,tone:clean(input.tone||'natural',48),
+      createdAt:existing?.createdAt||this.clock().toISOString(),source:'playlist-workshop'};
+    if(existing)Object.assign(existing,program);
+    else {
+      if(this.programs.length>=MAX_PROGRAMS)throw new Error('BCN program library is full');
+      this.programs.push(program);
+    }
+    this.save();
+    return this.state();
+  }
+  removeProgram(id) {
+    if(this.shows.some(show=>show.programId===id))
+      throw new Error('Remove scheduled show blocks before deleting this generated program');
+    const before=this.programs.length;
+    this.programs=this.programs.filter(item=>item.id!==id);
+    if(this.programs.length===before)throw new Error('BCN program not found');
+    this.save();
+    return this.state();
+  }
   addShow(input) {
     if (this.shows.length >= MAX_SHOWS) throw new Error('BCN show schedule is full');
     const show = validateShow(input);
+    if(show.programId){
+      const program=this.programs.find(item=>item.id===show.programId);
+      if(!program)throw new Error('Choose a generated program from the BCN library before scheduling it');
+      show.name=program.name;
+      show.tone=program.tone;
+    }
     checkOverlap(this.shows, show);
     this.shows.push(show);
     this.shows.sort((a, b) => a.day - b.day || a.start.localeCompare(b.start));
@@ -185,6 +240,7 @@ class BcnDesk {
     if (current) {
       next.context.showName = current.name;
       next.context.tone = current.tone;
+      if(current.programId) next.context.programId = current.programId;
     }
     let requestId = null;
     if (!explicit) {

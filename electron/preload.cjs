@@ -5,6 +5,9 @@ const invoke = (channel, ...args) => ipcRenderer.invoke(channel, ...args);
 contextBridge.exposeInMainWorld('spider', {
   appInfo: () => invoke('app:info'),
   novaHealth: () => invoke('nova:health'),
+  novaVoices: () => invoke('nova:voices'),
+  auditStoredMedia: (tracks) => invoke('media:audit-stored', tracks),
+  backupStoredMedia: (snapshot) => invoke('media:backup-stored', snapshot),
   novaPrepare: (payload) => invoke('nova:prepare', payload),
   bcnDeskState: () => invoke('bcn:desk-state'),
   bcnSetListenerIntake: (enabled) => invoke('bcn:listener-intake', enabled),

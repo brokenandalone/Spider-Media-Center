@@ -230,8 +230,11 @@
     if(!dj||!bridge)throw Error('AutoDJ is not ready.');
     const tracks=cueEligibleTracks(bridge);
     if(!tracks.length)throw Error('No BCN music in the cue. Queue tracks from Broken Sorrow, Therapy and Sonz, Justin Therapy or J-Cold, with accurate artist metadata.');
-    let cue=dj.playlists.find(p=>p.id===CUE_ID);
-    if(!cue){cue={id:CUE_ID,name:'BCN Live Cue (session only)',tracks:[]};dj.playlists.push(cue);}
+    // The session cue must never enter saved playlist persistence, even when
+    // a user creates another playlist while AutoDJ is running.
+    const cue=dj.__bcnCueSession||(dj.__bcnCueSession={
+      id:CUE_ID,name:'BCN Live Cue (session only)',tracks:[]
+    });
     cue.tracks=tracks.map(t=>({...t,weight:1,kind:'music'}));
     if(!dj.__bcnCueGuardInstalled){
       const pick=dj._selectNextFromPlaylist.bind(dj);
@@ -254,7 +257,12 @@
       };
       dj.__bcnCueGuardInstalled=true;
     }
-    dj.start(CUE_ID);
+    dj.playlists.push(cue);
+    try { dj.start(CUE_ID); }
+    finally {
+      const at=dj.playlists.indexOf(cue);
+      if(at>=0)dj.playlists.splice(at,1);
+    }
     if(!dj.__bcnCueRefresh){
       dj.__bcnCueRefresh=window.setInterval(()=>{
         if(!dj.isRunning?.()||dj.currentPlaylist?.id!==CUE_ID)return;

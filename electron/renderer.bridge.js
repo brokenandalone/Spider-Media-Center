@@ -14,6 +14,7 @@ window.__spiderPlayerBridge = {
   getQueueSnapshot() { return engine.getQueueSnapshot(); },
   getLibrarySnapshot() { return engine.getLibrarySnapshot ? engine.getLibrarySnapshot() : { library: [], count: 0 } },
   removeLibraryEntries(ids) { return engine.removeLibraryEntries ? engine.removeLibraryEntries(ids) : [] },
+  removeInvalidStoredMedia(records) { return engine.removeInvalidStoredMedia ? engine.removeInvalidStoredMedia(records) : Promise.reject(new Error('Music library cleanup unavailable')) },
   prepareMovie(url) { return engine.prepareMovie(url); },
   playQueueIndex(i) { return engine.playQueueIndex(i); },
   enqueue(item, playNow = false) { return engine.enqueue ? engine.enqueue(item, !!playNow) : Promise.reject(new Error('no engine enqueue')) },

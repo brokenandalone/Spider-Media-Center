@@ -21,6 +21,7 @@
       const broadcast = window.__spiderPlayerBridge?.getRadioState?.() || {};
       request.context = {
         ...(request.context && typeof request.context === 'object' ? request.context : {}),
+        voiceProfile: (()=>{try{return localStorage.getItem('spider.nova.voice.profile.v1')||'auto';}catch{return 'auto';}})(),
         showName: broadcast.active ? String(broadcast.currentShow || broadcast.show || 'BCN Live') : 'BCN Live'
       };
       if (!Number.isFinite(Number(request.secondsRemaining))) {
@@ -216,6 +217,80 @@
     }
   }
 
+  // Session-only cue rotation: never writes or publishes a playlist.
+  const CUE_ID='bcn-live-cue-session';
+  function cueEligibleTracks(bridge) {
+    const isBcn=window.SpiderPlaylistWorkshopCore?.isBcnArtist;
+    return (bridge?.getQueueSnapshot?.()?.queue||[]).filter(t=>
+      t?.url && t?.kind!=='commercial' && t?.kind!=='shoutout' &&
+      typeof isBcn==='function' && isBcn(t.artist) &&
+      !/\.(mp4|mkv|avi|mov|webm|wmv)(?:[?#]|$)/i.test(t.url));
+  }
+  function startCueAutoDJ(dj,bridge) {
+    if(!dj||!bridge)throw Error('AutoDJ is not ready.');
+    const tracks=cueEligibleTracks(bridge);
+    if(!tracks.length)throw Error('No BCN music in the cue. Queue tracks from Broken Sorrow, Therapy and Sonz, Justin Therapy or J-Cold, with accurate artist metadata.');
+    // The session cue must never enter saved playlist persistence, even when
+    // a user creates another playlist while AutoDJ is running.
+    const cue=dj.__bcnCueSession||(dj.__bcnCueSession={
+      id:CUE_ID,name:'BCN Live Cue (session only)',tracks:[]
+    });
+    cue.tracks=tracks.map(t=>({...t,weight:1,kind:'music'}));
+    if(!dj.__bcnCueGuardInstalled){
+      const pick=dj._selectNextFromPlaylist.bind(dj);
+      const fallback=dj._selectFallbackTrack.bind(dj);
+      dj._selectNextFromPlaylist=function(playlist=this.currentPlaylist){
+        if(playlist?.id!==CUE_ID)return pick(playlist);
+        const all=cueEligibleTracks(window.__spiderPlayerBridge);
+        if(!all.length)return null;
+        const recent=new Set((this.recentTracks||[]).map(item=>item.key));
+        let options=all.filter(item=>!recent.has(item.url||item.id));
+        if(!options.length)options=all;
+        const last=(this.recentTracks||[]).slice(0,2).map(item=>item.artist);
+        const varied=options.filter(item=>!last.includes(String(item.artist||'').trim().toLowerCase()));
+        if(varied.length)options=varied;
+        return options[Math.floor(Math.random()*options.length)];
+      };
+      dj._selectFallbackTrack=function(){
+        if(this.currentPlaylist?.id===CUE_ID)return null;
+        return fallback();
+      };
+      dj.__bcnCueGuardInstalled=true;
+    }
+    dj.playlists.push(cue);
+    try { dj.start(CUE_ID); }
+    finally {
+      const at=dj.playlists.indexOf(cue);
+      if(at>=0)dj.playlists.splice(at,1);
+    }
+    if(!dj.__bcnCueRefresh){
+      dj.__bcnCueRefresh=window.setInterval(()=>{
+        if(!dj.isRunning?.()||dj.currentPlaylist?.id!==CUE_ID)return;
+        const next=cueEligibleTracks(window.__spiderPlayerBridge);
+        if(next.length){cue.tracks=next.map(t=>({...t,weight:1,kind:'music'}));dj.currentPlaylist=cue;}
+      },3000);
+    }
+    return tracks.length;
+  }
+  function installCueClickHandler(){
+    if(window.__bcnCueClickInstalled)return;
+    window.__bcnCueClickInstalled=true;
+    document.addEventListener('click',event=>{
+      const button=event.target?.closest?.('.dj-center-actions button');
+      const dj=window.__spiderAutoDJ;
+      if(!button||!/auto\s*dj/i.test(button.textContent||'')||!dj||dj.isRunning?.())return;
+      try {
+        startCueAutoDJ(dj,window.__spiderPlayerBridge);
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      } catch(error){
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        alert(error?.message||String(error));
+      }
+    },true);
+  }
+
   function ensureAutoDjControl() {
     const actions = document.querySelector('.dj-center-actions');
     const dj = window.__spiderAutoDJ;
@@ -238,26 +313,7 @@
             return;
           }
 
-          let playlist = dj.listPlaylists().find((item) => item?.tracks?.length);
-          if (!playlist) {
-            const queue = bridge.getQueueSnapshot?.()?.queue || [];
-            if (!queue.length) {
-              alert('AutoDJ needs at least one track in the current queue.');
-              return;
-            }
-
-            playlist = dj.createPlaylist('BCN Auto Queue');
-            dj.savePlaylist({
-              ...playlist,
-              tracks: queue.map((item) => ({
-                ...item,
-                weight: 1,
-                kind: item.kind || 'music'
-              }))
-            });
-          }
-
-          dj.start(playlist.id);
+          startCueAutoDJ(dj,bridge);
           ensureAutoDjControl();
         } catch (error) {
           alert(`AutoDJ could not start: ${error?.message || error}`);
@@ -644,6 +700,30 @@
 
 
     const novaStatus = el('p', { className: 'bcn-muted', text: 'Nova runs through the native Spider OS DJ service.' });
+    const novaVoice=el('select',{id:'bcnNovaVoice', 'aria-label':'Nova voice profile'});
+    const novaVoices=[
+      ['auto','Automatic: Natasha / Matilda backup'],['natasha','Natasha (online)'],
+      ['matilda','Matilda (Piper offline)'],['kirra','Kirra (Piper offline)'],
+      ['bindi','Bindi (Piper offline)'],['marlo','Marlo (Piper offline)'],
+      ['tully','Tully (Piper offline)'],['willow','Willow (Piper offline)']
+    ];
+    for(const [id,label] of novaVoices)novaVoice.append(el('option',{value:id,text:label}));
+    try{novaVoice.value=localStorage.getItem('spider.nova.voice.profile.v1')||'auto';}catch{novaVoice.value='auto';}
+    novaVoice.addEventListener('change',()=>{
+      try{localStorage.setItem('spider.nova.voice.profile.v1',novaVoice.value);}catch{}
+      novaStatus.textContent='Nova voice set to '+novaVoice.options[novaVoice.selectedIndex].text+'. Changes apply to the next DJ break.';
+    });
+    const novaVoiceAvailability=el('p',{className:'bcn-muted',text:'Voice availability is checked through the native Nova service.'});
+    const refreshNovaVoices=async()=>{
+      try{
+        const result=await window.spider.novaVoices();
+        novaVoiceAvailability.textContent=result.piperReady
+          ?'Webbie Australian Piper voices are ready. Available: '+result.voices.join(', ')+'.'
+          :'Australian Piper voice model is not installed for this user. Nova can fall back to Natasha or eSpeak.';
+      }catch{
+        novaVoiceAvailability.textContent='Native Nova voice update not installed yet. Existing Natasha/eSpeak continues working.';
+      }
+    };
     const refreshNova = async () => {
       novaStatus.textContent = 'Checking Nova on Spider OS…';
       try {
@@ -834,7 +914,9 @@
       el('div', { className: 'bcn-section' },
         el('h3', { text: 'Nova · Native AI DJ' }),
         novaStatus,
-        checkNova
+        el('div',{className:'bcn-row'},novaVoice,checkNova),
+        novaVoiceAvailability,
+        el('button',{type:'button',className:'bcn-small-button',text:'Check Australian voices',onclick:refreshNovaVoices})
       ),
       el('div', { className: 'bcn-section' },
         el('h3', { text: 'BCN Continuity Guard' }),
@@ -959,26 +1041,7 @@
           if (dj.isRunning()) {
             dj.stop();
           } else {
-            let playlist = dj.listPlaylists().find((item) => item?.tracks?.length);
-            if (!playlist) {
-              const queue = bridge.getQueueSnapshot?.()?.queue || [];
-              if (!queue.length) {
-                alert('AutoDJ needs at least one track in the current queue.');
-                return;
-              }
-
-              playlist = dj.createPlaylist('BCN Auto Queue');
-              dj.savePlaylist({
-                ...playlist,
-                tracks: queue.map((item) => ({
-                  ...item,
-                  weight: 1,
-                  kind: item.kind || 'music'
-                }))
-              });
-            }
-
-            dj.start(playlist.id);
+            startCueAutoDJ(dj,bridge);
           }
 
           button.textContent = dj.isRunning() ? 'STOP AUTO DJ' : 'START AUTO DJ';
@@ -1014,6 +1077,7 @@
     buildPanel();
     ensureTalkToSpiderControl();
     ensureFloatingAutoDjControl();
+    installCueClickHandler();
     syncConnectionCard();
     syncUiPolish();
   }

@@ -22,6 +22,22 @@ Imported JSON playlist files require real existing playable URLs; if you move fi
 
 If duration metadata is missing, the show runtime is an estimate. If the source library is too small to fill the time without repeats, a warning appears. The builder never falsely claims that it created a continuous 24/7 cloud broadcast.
 
+## Library cleanup
+
+Click **PLAYLIST WORKSHOP > Music Library Cleanup > Scan invalid entries** to review stale local file references, such as deleted media, empty files, broken `file://` links or unsupported formats. The report separates valid, invalid, network/stream and inaccessible entries. Temporarily disconnected removable drives should be reconnected before cleanup because missing paths will be reported as missing. The operator must confirm **Clear invalid stored entries**. AutoDJ and BCN broadcasting must be stopped before any cleanup. The app first writes a private JSON recovery snapshot under the Electron user-data directory in `library-cleanup-backups`. If backup fails, it will not clear any stored references. Actual audio files are never deleted.
+
+By default, cleanup also removes invalid song references inside existing saved AutoDJ playlists and marks affected show rundowns for regeneration. Turn off the checkbox to keep existing playlists unchanged. Active playback should be paused. The scan is repeated just before removal; if the library has changed, the operation stops and asks for a fresh scan.
+
+## Nova's shared Australian voice profiles
+
+BCN MEDIA > Nova > **Voice profile** now supports automatic Natasha/Matilda fallback, Natasha online, and Webbie's existing Australian neural Piper speakers: Matilda, Kirra, Bindi, Marlo, Tully, and Willow. It uses the **same Webbie user-owned model files** at `~/.local/share/spider-os/webbie-neural-preview`. No model files are downloaded in the installer or included in the Media Center archive. The preferred voice is stored as a small local setting and is sent securely to Nova with the next DJ-break request; it does not play on desktop speakers separately. Nova returns audio to the existing DJ mixer. If the chosen Piper voice is not available, Nova falls back to Matilda if available, then Natasha online, then eSpeak. The **Check Australian voices** control reports installed voice availability from native Nova.
+
+The paired installer updates `service.py`, `nova_host.py`, and `nova_voice.py` from the pinned, tested Spider OS revision and backs up prior files before restart. Voice availability and live mixer playback must still be checked on-device.
+
+## Nova plays from the cue when there is no selected playlist
+
+Click **Start AutoDJ** after putting approved songs in the player queue. If no show playlist has been explicitly started, the button starts a **session-only BCN Live Cue** rotation from the existing queue without creating/saving a playlist. Its available tracks update when the queue changes. Only Broken Sorrow, Therapy and Sonz, Justin Therapy, and J-Cold are eligible. Incorrectly tagged or non-BCN music is never chosen. Stop AutoDJ to end cue rotation. Existing directly selected playlists and programmed show scheduling remain independent. This feature never starts the public broadcaster, adds downloaded tracks, or grants stream rights.
+
 ## Verification and install guardrails
 
 - New assets are in `dist/playlist-workshop-{core.js,js,css}`. Both React and legacy player HTML load them; the existing React bundle is not replaced.

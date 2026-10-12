@@ -4,7 +4,7 @@
 set -Eeuo pipefail
 umask 077
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-NOVA_OS_COMMIT='e9b13a65c26eb4975aebce13177f84c9190efb48'
+NOVA_OS_COMMIT='b0099290f9618b47a22342b43ca25bb856852a9e'
 NOVA_OS_REPO='brokenandalone/spider-narive-os'
 NOVA_TARGET='/usr/local/lib/spider-os/media/ai-dj'
 MEDIA_TARGET='/opt/spider-media-center/resources/app.asar'
@@ -49,7 +49,7 @@ UNIT_COMMAND="$(systemctl --user show -p ExecStart --value spider-ai-dj.service)
 WORK="$(mktemp -d)"
 trap 'rm -rf -- "$WORK"' EXIT
 mkdir -p "$WORK/nova"
-for filename in nova_host.py service.py; do
+for filename in nova_host.py nova_voice.py service.py; do
   curl --fail --location --silent --show-error --retry 3 \
     "https://raw.githubusercontent.com/$NOVA_OS_REPO/$NOVA_OS_COMMIT/media/ai-dj/$filename" \
     -o "$WORK/nova/$filename"
@@ -74,6 +74,10 @@ with ThreadingHTTPServer(('127.0.0.1',0),service.Handler) as server:
             payload=json.load(response)
             if response.status!=200 or payload.get('ok') is not True or payload.get('host')!='Nova':
                 raise RuntimeError('Nova HTTP /health returned invalid identity: '+repr(payload))
+        with opener.open(url+'/dj/voices',timeout=4) as response:
+            voice_profiles=json.load(response)
+            if response.status!=200 or 'matilda' not in voice_profiles.get('voices', []):
+                raise RuntimeError('Native Nova Australian voice profiles are not available')
         with opener.open(urllib.request.Request(url+'/health',method='OPTIONS'),timeout=4) as response:
             if response.status!=204:
                 raise RuntimeError('Nova HTTP OPTIONS response was invalid')
@@ -95,6 +99,11 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 NOVA_BACKUP="$STORAGE/nova-$STAMP"
 mkdir -m700 -- "$NOVA_BACKUP"
 sudo cp -a -- "$NOVA_TARGET/service.py" "$NOVA_BACKUP/service.py"
+HAD_VOICE=no
+if [[ -f "$NOVA_TARGET/nova_voice.py" && ! -L "$NOVA_TARGET/nova_voice.py" ]]; then
+  HAD_VOICE=yes
+  sudo cp -a -- "$NOVA_TARGET/nova_voice.py" "$NOVA_BACKUP/nova_voice.py"
+fi
 HAD_PERSONA=no
 if [[ -f "$NOVA_TARGET/nova_host.py" && ! -L "$NOVA_TARGET/nova_host.py" ]]; then
   HAD_PERSONA=yes
@@ -112,6 +121,11 @@ rollback(){
   local problems=0
   sudo install -m644 -- "$MEDIA_BACKUP" "$MEDIA_TARGET" || problems=1
   sudo install -m644 -- "$NOVA_BACKUP/service.py" "$NOVA_TARGET/service.py" || problems=1
+  if [[ "$HAD_VOICE" == yes ]]; then
+    sudo install -m644 -- "$NOVA_BACKUP/nova_voice.py" "$NOVA_TARGET/nova_voice.py" || problems=1
+  else
+    sudo rm -f -- "$NOVA_TARGET/nova_voice.py" || problems=1
+  fi
   if [[ "$HAD_PERSONA" == yes ]]; then
     sudo install -m644 -- "$NOVA_BACKUP/nova_host.py" "$NOVA_TARGET/nova_host.py" || problems=1
   else
@@ -119,6 +133,11 @@ rollback(){
   fi
   sudo cmp -s -- "$MEDIA_BACKUP" "$MEDIA_TARGET" || problems=1
   sudo cmp -s -- "$NOVA_BACKUP/service.py" "$NOVA_TARGET/service.py" || problems=1
+  if [[ "$HAD_VOICE" == yes ]]; then
+    sudo cmp -s -- "$NOVA_BACKUP/nova_voice.py" "$NOVA_TARGET/nova_voice.py" || problems=1
+  else
+    [[ ! -e "$NOVA_TARGET/nova_voice.py" ]] || problems=1
+  fi
   if [[ "$HAD_PERSONA" == yes ]]; then
     sudo cmp -s -- "$NOVA_BACKUP/nova_host.py" "$NOVA_TARGET/nova_host.py" || problems=1
   else
@@ -145,6 +164,7 @@ trap on_exit EXIT
 sudo bash "$ROOT/install-v7-preview.sh" --install
 installed=yes
 sudo install -m644 -- "$WORK/nova/nova_host.py" "$NOVA_TARGET/nova_host.py"
+sudo install -m644 -- "$WORK/nova/nova_voice.py" "$NOVA_TARGET/nova_voice.py"
 sudo install -m644 -- "$WORK/nova/service.py" "$NOVA_TARGET/service.py"
 systemctl --user restart spider-ai-dj.service
 if ! python3 - <<'PY'
@@ -176,7 +196,7 @@ then
   exit 1
 fi
 installed=no
-echo 'Combined V7 Media Center + V6 native Nova installation completed.'
+echo 'Combined V7 Media Center + native Nova Australian voices installation completed.'
 echo "Paired backup directory: $NOVA_BACKUP"
 echo "Previous Media Center archive: $MEDIA_BACKUP"
 echo 'Reopen Media Center. Test local music, Nova voice, 3D visualizer, and BCN listener audio on another device.'

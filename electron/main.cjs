@@ -23,6 +23,7 @@ const {
 } = require('./network-directory.cjs');
 const { MediaCompatibility } = require('./media-compatibility.cjs');
 const { nativeNova } = require('./nova-service.cjs');
+const { audit: auditStoredMedia } = require('./music-library-audit.cjs');
 const nova = nativeNova();
 const { BcnDesk } = require('./bcn-desk.cjs');
 const { NovaPrepareQueue } = require('./bcn-prepare-queue.cjs');
@@ -1250,6 +1251,10 @@ ipcMain.handle('nova:health', (event) => {
   trustedMediaSender(event);
   return nova.health();
 });
+ipcMain.handle('nova:voices', (event) => {
+  trustedMediaSender(event);
+  return nova.voices();
+});
 ipcMain.handle('bcn:desk-state', (event) => {
   trustedMediaSender(event);
   return programmingDesk().state();
@@ -1302,6 +1307,25 @@ ipcMain.handle('media:prepare-compatibility', async (event, url) => {
 ipcMain.handle('media:cancel-compatibility', (event) => {
   if (!mainWindow || event.sender !== mainWindow.webContents) return false;
   return mediaCompatibility?.cancel() || false;
+});
+ipcMain.handle('media:audit-stored', (event, tracks) => {
+  trustedMediaSender(event);
+  if (radioState.active === true) throw new Error('Stop BCN broadcasting before cleaning stored music.');
+  return auditStoredMedia(tracks);
+});
+ipcMain.handle('media:backup-stored', (event, snapshot) => {
+  trustedMediaSender(event);
+  if (radioState.active === true) throw new Error('Stop BCN broadcasting before cleaning stored music.');
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)
+      || !Array.isArray(snapshot.library) || !Array.isArray(snapshot.queue)
+      || !Array.isArray(snapshot.playlists)) throw new Error('Invalid library backup payload');
+  const encoded = JSON.stringify({createdAt:new Date().toISOString(),version:1,...snapshot});
+  if (Buffer.byteLength(encoded)>24*1024*1024) throw new Error('Library backup too large; nothing removed.');
+  const directory=path.join(app.getPath('userData'),'library-cleanup-backups');
+  fs.mkdirSync(directory,{recursive:true,mode:0o700});
+  const file=path.join(directory,'before-cleanup-'+Date.now()+'-'+crypto.randomUUID()+'.json');
+  fs.writeFileSync(file,encoded,{encoding:'utf8',flag:'wx',mode:0o600});
+  return {ok:true,backupFile:file};
 });
 ipcMain.handle('media:choose', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {

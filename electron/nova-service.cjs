@@ -12,6 +12,20 @@ const MAX_REQUEST = 24 * 1024;
 const MAX_RESPONSE = 96 * 1024;
 const MAX_AUDIO = 4 * 1024 * 1024;
 
+const PRODUCTION_TYPES=new Set(['station_id','show_id','commercial','promo','sweeper','bumper','liner']);
+function productionInput(raw){
+  if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new Error('Invalid BCN production request');
+  const type=String(raw.type||'').toLowerCase();
+  if(!PRODUCTION_TYPES.has(type))throw new Error('Unsupported BCN production type');
+  const safe=(value,limit)=>String(value||'').replace(/[\x00-\x1f\x7f]/g,' ').trim().slice(0,limit);
+  const out={type,showName:safe(raw.showName,80),sponsor:safe(raw.sponsor,90),
+    brief:safe(raw.brief,320),approvedFacts:safe(raw.approvedFacts,400),
+    tone:safe(raw.tone,48),voiceProfile:safe(raw.voiceProfile,24).toLowerCase()};
+  if(type==='commercial'&&!out.sponsor)throw new Error('Commercial requires an identified sponsor');
+  if(!['auto','natasha','matilda','kirra','bindi','marlo','tully','willow'].includes(out.voiceProfile))
+    out.voiceProfile='auto';
+  return out;
+}
 function nativeNova(options = {}) {
   const port = options.port || 9876;
   const cacheDir = options.cacheDir || path.join(os.homedir(), '.cache', 'spider-os', 'ai-dj');
@@ -95,6 +109,35 @@ function nativeNova(options = {}) {
           ? {engine:String(result.lastVoice.engine||''),usedFallback:result.lastVoice.usedFallback===true,
              error:String(result.lastVoice.error||'').slice(0,300)} : null,
         robotVoiceAllowed:result.robotVoiceAllowed===true};
+    },
+    async draftProduction(input) {
+      const params = productionInput(input);
+      const reply=await localRequest('POST','/dj/draft',{
+        type:params.type,
+        context:{showName:params.showName,sponsor:params.sponsor,
+          approvedFacts:params.approvedFacts,brief:params.brief,tone:params.tone}
+      });
+      return {script:String(reply.script||'').slice(0,1100),
+        type:params.type,draft:true,approved:false};
+    },
+    async produceApproved(input) {
+      const params=productionInput(input);
+      const approvedCopy=typeof input?.approvedCopy==='string'?input.approvedCopy.trim():'';
+      if(input?.copyApproved!==true || approvedCopy.length<8 ||
+         approvedCopy.length>1100 || approvedCopy.split(/\s+/).length>175)
+        throw new Error('Review and explicitly approve a script before Nova records it');
+      const reply=await localRequest('POST','/dj/prepare',{
+        type:params.type,currentTrack:{},nextTrack:{},
+        context:{showName:params.showName,sponsor:params.sponsor,
+          approvedFacts:params.approvedFacts,brief:params.brief,tone:params.tone,
+          voiceProfile:params.voiceProfile,productionMode:true,
+          copyApproved:true,approvedCopy}
+      });
+      if(String(reply.script||'').trim()!==approvedCopy)
+        throw new Error('Nova did not return exactly the operator-approved copy');
+      return {script:approvedCopy,type:params.type,audioDataUrl:readGeneratedAudio(reply.audioFile),
+        voiceEngine:String(reply.voiceEngine||'unverified').slice(0,40),
+        voiceFallback:reply.voiceFallback===true};
     },
     async prepare(payload) {
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {

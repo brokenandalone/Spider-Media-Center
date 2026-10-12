@@ -46,7 +46,7 @@ test('legacy one-off timer inventory is visible and operator-only shutdown prese
 
 test('paired installer pins the native neural-only Nova version and reports actual voice engine',()=>{
   const installer=read('scripts/install-v7-with-v6-nova.sh');
-  assert.match(installer,/NOVA_OS_COMMIT='d66eeebc06a2d2546a7f906ab38311170b2bf736'/);
+  assert.match(installer,/NOVA_OS_COMMIT='d1bd73ccff3abc6a8f810d74bc2f0ca13b28f3f5'/);
   const adapter=read('electron/nova-service.cjs');
   assert.match(adapter,/voiceEngine:/);
   assert.match(adapter,/robotVoiceAllowed:/);

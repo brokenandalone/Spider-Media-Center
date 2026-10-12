@@ -14,7 +14,7 @@ const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'spider-media-build-'));
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const runtime = ['main.cjs', 'preload.cjs', 'renderer.js', 'renderer.audio.js',
   'renderer.bridge.js', 'network-directory.cjs', 'media-compatibility.cjs', 'nova-service.cjs', 'bcn-desk.cjs', 'bcn-prepare-queue.cjs', 'bcn-listener-intake.cjs', 'radio-telemetry.cjs', 'radio-recovery.cjs', 'radio-relay-probe.cjs',
-  'player.html', 'offline.html', 'styles.css', 'music-library-audit.cjs'];
+  'player.html', 'offline.html', 'styles.css', 'music-library-audit.cjs', 'bcn-production.cjs'];
 try {
   fs.mkdirSync(output, { recursive: true });
   fs.mkdirSync(path.join(stage, 'electron'));
@@ -77,7 +77,8 @@ try {
       'Australian neural Nova voices with Webbie Piper and Natasha/eSpeak recovery',
       'BCN cue rotation with a temporary Unknown Artist allowance for untagged music',
       'missing-media library cleanup with verified snapshots and no file deletion',
-      'clear upcoming music without stopping current playback, purge blank cue rows, and disable stale AutoDJ refill'
+      'clear upcoming music without stopping current playback, purge blank cue rows, and disable stale AutoDJ refill',
+      'operator-reviewed Nova station IDs, commercials, promos, sweepers and saved voice production'
     ],
     sourceRevision: revision,
     node: process.version,

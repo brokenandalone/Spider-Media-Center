@@ -38,6 +38,21 @@ The new canonical authoring route is **Playlist Workshop > Save show to BCN Sche
 
 **Not yet device-verified:** installed Webbie Piper model executable at the expected path; local speaker voice quality; GPU/visualizer compatibility; actual BCN audio streaming; one-off and weekly schedule interactions across long runtimes; listener microphone/speaker routing; correct Python and Electron runtime updates on Spider OS. No installation was performed by repository merge.
 
+
+## Nova Production Studio: on-air imaging still belongs to Nova
+
+**The earlier retirement of the legacy browser voice does not remove radio imaging.** Native Nova now handles seven owner-directed production categories: Station ID, Show ID, Commercial/Sponsor Spot, Show Promo, Sweeper, Bumper and Station Liner. The BCN Media panel contains a single **Nova Production Studio**, not a new scheduler or DJ service.
+
+A safe production workflow is:
+
+1. Choose a category and give the production a clear title. For show IDs/promos, enter the existing show name. For commercials, enter the verified sponsor name. Enter only operator-approved facts, offers and contact details.
+2. Select **Nova: Draft Script**. This creates text only. Edit it and fact-check all claims. Drafting does not synthesize voice, schedule anything, or enqueue audio.
+3. Approve the *exact* script with the checkbox. Select **Nova: Record Approved Script**. The native /dj/prepare production mode requires both approval and matching text; it uses the same neural voice selected in BCN Media. No robotic eSpeak voice fallback is permitted for on-air production.
+4. Use **Preview Recording** only while BCN is off air; desktop loopback recording may otherwise pick up speaker preview audio.
+5. Choose **Save Approved Spot** to write the audio to a restricted folder inside the Electron user-data location (BCN production library). A separate **Cue explicitly** button enqueues a saved spot after confirmation. No production is placed on air automatically.
+
+Existing live music transitions, show intro/outro, the automatic recurring station IDs, approved listener requests and the separate public broadcast transport remain intact. The saved production library is separate from music/AutoDJ playlist metadata and contains real .wav or .mp3 files, not blank text-only queue entries. Full automation of ads, timed breaks, sponsorship contracts, music-rights verification and unattended commercial insertion are **not** claimed.
+
 ## Remaining priorities
 
 1. **Native voice acceptance:** on the target desktop check `curl --noproxy '*' -fsS http://127.0.0.1:9876/dj/voices`, ensure `piperReady` is true, select Matilda, trigger a test break and verify `lastVoice.engine` and audible audio. Inspect `journalctl --user -u spider-ai-dj.service` if it fails.

@@ -1010,6 +1010,134 @@
       }
     });
 
+    // One production desk. Drafts never air and are never saved until the
+    // operator edits/approves the exact spoken copy and listens to the result.
+    const productionType=el('select',{'aria-label':'BCN imaging category'});
+    for(const [key,label] of [
+      ['station_id','Station ID'],['show_id','Show ID'],['commercial','Commercial / Sponsor Spot'],
+      ['promo','Show Promo'],['sweeper','Sweeper'],['bumper','Bumper'],['liner','Station Liner']
+    ])productionType.append(el('option',{value:key,text:label}));
+    const productionTitle=el('input',{type:'text',maxlength:'100',placeholder:'Production title'});
+    const productionShow=el('input',{type:'text',maxlength:'80',placeholder:'Show name (for show IDs and promos)'});
+    const productionSponsor=el('input',{type:'text',maxlength:'90',placeholder:'Verified sponsor name (for commercials)'});
+    const productionFacts=el('textarea',{maxlength:'400',rows:'2',placeholder:'Approved facts, URLs, offers or disclaimers. Nova must not invent any.'});
+    const productionBrief=el('textarea',{maxlength:'320',rows:'2',placeholder:'Creative direction: audience, sound, mood, length.'});
+    const productionScript=el('textarea',{maxlength:'1100',rows:'5',placeholder:'Generate a draft, then edit the exact words Nova should record.'});
+    const productionApproved=el('input',{type:'checkbox','aria-label':'Approve exact production script'});
+    const productionStatus=el('p',{className:'bcn-muted',text:'No script recorded. Draft, approve, produce and save a spot.'});
+    const productionLibrary=el('div',{className:'bcn-results'});
+    let recordedProduction=null;
+    let previewAudio=null;
+    const resetRecording=()=>{
+      recordedProduction=null;
+      if(previewAudio){try{previewAudio.pause();}catch{}previewAudio=null;}
+    };
+    for(const node of [productionScript,productionType,productionSponsor,productionTitle,
+      productionShow,productionFacts,productionBrief,novaVoice]){
+      node.addEventListener('input',()=>{resetRecording();productionApproved.checked=false;});
+      node.addEventListener('change',()=>{resetRecording();productionApproved.checked=false;});
+    }
+    const productionInput=()=>({
+      type:productionType.value,title:productionTitle.value.trim(),
+      showName:productionShow.value.trim(),sponsor:productionSponsor.value.trim(),
+      approvedFacts:productionFacts.value.trim(),brief:productionBrief.value.trim(),
+      voiceProfile:novaVoice.value
+    });
+    const refreshProductionLibrary=async()=>{
+      productionLibrary.replaceChildren();
+      try{
+        const items=await window.spider.bcnProductionList();
+        if(!items.length)productionLibrary.append(el('p',{className:'bcn-muted',text:'No approved imaging recorded yet.'}));
+        items.slice().reverse().forEach(item=>{
+          const queue=el('button',{type:'button',className:'bcn-small-button',text:'Cue explicitly',onclick:()=>{
+            const bridge=window.__spiderPlayerBridge||window.__spiderPlayerEngine;
+            if(typeof bridge?.enqueueMany!=='function'){productionStatus.textContent='Music cue is still loading.';return;}
+            if(!window.confirm('Add '+item.title+' to the upcoming player queue? If BCN is broadcasting, this could be heard on air.'))return;
+            bridge.enqueueMany([{id:'bcn-spot-'+item.id,url:item.url,title:item.title,artist:'Nova',
+              source:'local',extension:item.url.endsWith('.wav')?'wav':'mp3',kind:item.type}],false);
+            productionStatus.textContent=item.title+' queued by the operator. No automatic spot scheduling was enabled.';
+          }});
+          const remove=el('button',{type:'button',className:'bcn-small-button',text:'Delete saved spot',onclick:async()=>{
+            const queueItems=(window.__spiderPlayerBridge||window.__spiderPlayerEngine)?.getQueueSnapshot?.()?.queue||[];
+            if(queueItems.some(track=>track?.url===item.url)){
+              productionStatus.textContent='Remove this spot from Up Next before deleting its audio, or the queue will contain a missing file.';return;
+            }
+            if(!window.confirm('Permanently remove this recorded BCN spot? This does not delete any source music.'))return;
+            try{await window.spider.bcnProductionRemove(item.id);await refreshProductionLibrary();}
+            catch(e){productionStatus.textContent=e?.message||String(e);}
+          }});
+          productionLibrary.append(el('div',{className:'bcn-result-card'},
+            el('span',{text:item.title+' · '+item.type.replace(/_/g,' ')+' · '+item.voiceEngine}),
+            el('div',{className:'bcn-result-actions'},queue,remove)));
+        });
+      }catch(error){productionStatus.textContent='Could not read production library: '+(error?.message||String(error));}
+    };
+    const draftProduction=el('button',{type:'button',className:'bcn-primary',text:'Nova: Draft Script',onclick:async()=>{
+      draftProduction.disabled=true;resetRecording();productionApproved.checked=false;
+      try{
+        const data=await window.spider.novaProductionDraft(productionInput());
+        productionScript.value=data.script||'';
+        productionStatus.textContent='Draft only. Edit it, verify all sponsor claims, then approve the exact words to record.';
+      }catch(error){productionStatus.textContent='Draft failed: '+(error?.message||String(error));}
+      finally{draftProduction.disabled=false;}
+    }});
+    const recordProduction=el('button',{type:'button',className:'bcn-primary',text:'Nova: Record Approved Script',onclick:async()=>{
+      if(!productionApproved.checked){productionStatus.textContent='Check approval after reviewing the script. Nova will not record unapproved copy.';return;}
+      recordProduction.disabled=true;resetRecording();
+      try{
+        const params=productionInput();
+        if(!params.title||!productionScript.value.trim())throw Error('Title and written script are required.');
+        recordedProduction=await window.spider.novaProductionVoice({...params,
+          approvedCopy:productionScript.value.trim(),copyApproved:true});
+        productionStatus.textContent='Recorded with '+recordedProduction.voiceEngine+
+          (recordedProduction.voiceFallback?' (neural fallback)':'')+
+          '. Preview it off-air, then save the approved production.';
+      }catch(error){productionStatus.textContent='Voice recording failed: '+(error?.message||String(error));}
+      finally{recordProduction.disabled=false;}
+    }});
+    const previewProduction=el('button',{type:'button',className:'bcn-small-button',text:'Preview Recording',onclick:async()=>{
+      if(!recordedProduction?.audioDataUrl){productionStatus.textContent='Record an approved script first.';return;}
+      if((window.__spiderPlayerBridge||window.__spiderPlayerEngine)?.getRadioState?.()?.active){
+        productionStatus.textContent='Stop BCN broadcasting before previewing a spot, especially if your sound routing captures desktop audio.';return;
+      }
+      try{
+        if(previewAudio)previewAudio.pause();
+        previewAudio=new Audio(recordedProduction.audioDataUrl);
+        await previewAudio.play();
+      }catch(error){productionStatus.textContent='Preview playback failed: '+(error?.message||String(error));}
+    }});
+    const saveProduction=el('button',{type:'button',className:'bcn-small-button',text:'Save Approved Spot',onclick:async()=>{
+      if(!productionApproved.checked||!recordedProduction?.audioDataUrl||
+         recordedProduction.script!==productionScript.value.trim()){
+        productionStatus.textContent='Record the exact approved script again before saving.';return;
+      }
+      saveProduction.disabled=true;
+      try{
+        const info=productionInput();
+        const saved=await window.spider.bcnProductionSave({...info,script:recordedProduction.script,
+          voiceEngine:recordedProduction.voiceEngine,audioDataUrl:recordedProduction.audioDataUrl,approved:true});
+        resetRecording();productionApproved.checked=false;
+        productionStatus.textContent='Saved '+saved.title+' to the BCN production library. It has NOT been placed on air.';
+        await refreshProductionLibrary();
+      }catch(error){productionStatus.textContent='Could not save spot: '+(error?.message||String(error));}
+      finally{saveProduction.disabled=false;}
+    }});
+    const imagingPanel=el('div',{className:'bcn-section',id:'bcnProductionStudio'},
+      el('h3',{text:'Nova Production Studio · Station Imaging & Commercials'}),
+      el('p',{className:'bcn-muted',text:'Create show IDs, station IDs, commercials, promos, sweepers, bumpers and liners. Nova drafts copy and records it in your selected neural voice. An approved spot never goes on air automatically.'}),
+      el('div',{className:'bcn-row'},productionType,productionTitle,productionShow,productionSponsor),
+      el('label',{className:'bcn-muted'},'Production brief',productionBrief),
+      el('label',{className:'bcn-muted'},'Approved sponsor facts (never invent claims)',productionFacts),
+      el('label',{className:'bcn-muted'},'Script to record (editable)',productionScript),
+      el('label',{className:'bcn-row'},productionApproved,el('span',{text:'I have checked the copy, approved all claims, and authorized this recording.'})),
+      el('div',{className:'bcn-row'},draftProduction,recordProduction,previewProduction,saveProduction),
+      productionStatus,
+      el('h3',{text:'Saved BCN Imaging Library'}),
+      el('button',{type:'button',className:'bcn-small-button',text:'Refresh saved spots',onclick:refreshProductionLibrary}),
+      productionLibrary
+    );
+    void refreshProductionLibrary();
+
     panel.append(
       close,
       el('header', { className: 'bcn-panel-header' },
@@ -1082,6 +1210,7 @@
         novaRealVoice,
         el('button',{type:'button',className:'bcn-small-button',text:'Check actual voice engine',onclick:refreshNovaVoices})
       ),
+      imagingPanel,
       el('div', { className: 'bcn-section' },
         el('h3', { text: 'BCN Continuity Guard' }),
         el('p', { className: 'bcn-muted',

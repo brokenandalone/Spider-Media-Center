@@ -2077,12 +2077,14 @@ function clearStoredQueue(mode = 'upcoming') {
       ? planApi.removeEmptyRows(state.queue,state.currentIndex)
       : planApi.clearUpcoming(state.queue,state.currentIndex);
   const removed = plan.removed;
-  if (!removed) return {ok:true,removed:0,keptCurrent:plan.keptCurrent,...window.__spiderPlayerEngine.getQueueSnapshot()};
+  // Even when the queue is already empty, stop stale AutoDJ automation
+  // to prevent the ghost entry returning immediately after a clear.
   // AutoDJ can reconstruct a deleted "blank" track from its previous queue
   // rotation; explicitly disarm it before mutating queue persistence.
   try { window.__spiderAutoDJ?.stop?.(); }
   catch (error) { console.warn('Could not stop AutoDJ during queue clear:',error); }
   if (window.__spiderAutoDJ?.__bcnCueSession) window.__spiderAutoDJ.__bcnCueSession.tracks = [];
+  if (!removed) return {ok:true,removed:0,keptCurrent:plan.keptCurrent,...window.__spiderPlayerEngine.getQueueSnapshot()};
   const previous = currentItem();
   state.queue = [...plan.queue];
   state.currentIndex = plan.currentIndex;

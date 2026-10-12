@@ -8,7 +8,10 @@
  // Default on for the owner's currently untagged collection. Turning it off
  // restores the strict four-artist filter without changing any media tags.
  const allowUnknown=()=>{try{return localStorage.getItem(UNKNOWN_STORE)!=='off';}catch{return true;}};
- const setAllowUnknown=value=>{try{localStorage.setItem(UNKNOWN_STORE,value?'on':'off');}catch{}};
+ const setAllowUnknown=value=>{
+   try{localStorage.setItem(UNKNOWN_STORE,value?'on':'off');}catch{}
+   window.dispatchEvent(new Event('spider:bcn-unknown-change'));
+ };
  const state={chosen:new Set(),filter:'',playlistId:'',page:0,draft:null};
  const $=id=>document.getElementById(id);
  const bridge=()=>window.__spiderPlayerBridge||window.__spiderPlayerEngine;
@@ -238,6 +241,7 @@
    const panel=dom('section','pw-panel');panel.id='pw-panel';panel.hidden=true;panel.setAttribute('role','dialog');panel.setAttribute('aria-label','Playlist Workshop');
    const launch=btn('☷ PLAYLIST WORKSHOP',()=>{
      panel.hidden=false;
+     if($('pw-allow-unknown'))$('pw-allow-unknown').checked=allowUnknown();
      try{ready();refreshPlaylists();renderLibrary();notify('Select music in bulk or generate a BCN show. Live radio and Nova stay untouched.');}
      catch(e){notify(e.message,true);}
    },'pw-launcher');launch.id='pw-launcher';
@@ -285,6 +289,7 @@
    const unknownToggle=input('checkbox');
    unknownToggle.id='pw-allow-unknown';
    unknownToggle.checked=allowUnknown();
+   window.addEventListener('spider:bcn-unknown-change',()=>{unknownToggle.checked=allowUnknown();});
    unknownToggle.addEventListener('change',()=>{
      setAllowUnknown(unknownToggle.checked);
      state.draft=null;

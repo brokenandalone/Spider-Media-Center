@@ -369,6 +369,55 @@
     syncConnectionCard();
   }
 
+  // Queue cleanup controls live outside React's own DOM tree.
+  // Editing React-rendered "Up next" nodes directly can break reconciliation.
+  function queueAction(mode) {
+    const bridge = window.__spiderPlayerBridge || window.__spiderPlayerEngine;
+    if (!bridge?.getQueueSnapshot) {
+      window.dispatchEvent(new CustomEvent('spider:notice',{detail:{message:'The music queue is not ready yet.'}}));
+      return;
+    }
+    const snapshot = bridge.getQueueSnapshot();
+    const all = snapshot.queue?.length || 0;
+    if (!all && !window.__spiderAutoDJ?.isRunning?.()) {
+      window.dispatchEvent(new CustomEvent('spider:notice',{detail:{message:'The upcoming queue is already empty.'}}));
+      return;
+    }
+    const live = bridge.getRadioState?.()?.active === true;
+    if (mode === 'all' && live) {
+      window.dispatchEvent(new CustomEvent('spider:notice',{detail:{message:'Stop the BCN broadcast before clearing the currently playing song.'}}));
+      return;
+    }
+    if (live && !window.confirm('BCN is ON AIR. This will stop AutoDJ and remove queued tracks, leaving the current song playing until it ends. Continue?')) return;
+    const api = mode === 'all' ? 'clearQueue'
+      : mode === 'empty' ? 'removeEmptyQueueRows' : 'clearUpcomingQueue';
+    try {
+      if (typeof bridge[api] !== 'function') throw Error('Queue cleanup needs the updated Media Center playback engine.');
+      const result=bridge[api]();
+      const message=result?.ok === false ? (result.reason||result.error||'Queue cleanup blocked')
+        : (result?.removed||0)+' queued track'+(result?.removed===1?'':'s')+' removed. '+
+          (result?.keptCurrent ? 'Now playing stays on.' : 'The queue is empty.')+
+          ' AutoDJ was stopped; saved playlists and music files were preserved.';
+      window.dispatchEvent(new CustomEvent('spider:notice',{detail:{message}}));
+      document.getElementById('bcnQueueStatus')?.replaceChildren(document.createTextNode(message));
+    } catch(error) {
+      window.dispatchEvent(new CustomEvent('spider:notice',{detail:{message:error?.message||String(error)}}));
+    }
+  }
+  function ensureQueueControls(){
+    let toolbar=document.getElementById('spiderQueueToolbar');
+    if(toolbar)return;
+    toolbar=el('div',{id:'spiderQueueToolbar',role:'group','aria-label':'Upcoming music queue controls'},
+      el('button',{type:'button',id:'spiderClearUpcoming',text:'CLEAR UP NEXT',
+        title:'Keep now playing, remove all other queued tracks and stop AutoDJ',
+        onclick:()=>queueAction('upcoming')}),
+      el('button',{type:'button',id:'spiderPruneBlank',text:'REMOVE BLANK ROWS',
+        title:'Remove queue entries with no playable file URL',
+        onclick:()=>queueAction('empty')})
+    );
+    document.body.append(toolbar);
+  }
+
   function buildPanel() {
     if (document.getElementById('bcnMediaLauncher')) return;
 
@@ -387,6 +436,8 @@
     });
 
     const engineStatus = el('span', { className: 'bcn-status', text: 'Spider native engine · integration branch' });
+    const queueStatus = el('p',{id:'bcnQueueStatus',className:'bcn-muted',
+      text:'Clear Up Next keeps the current song and stops AutoDJ. Remove Blank Rows clears queue placeholders with no audio URL. Clear All requires BCN to be off air.'});
 
     const iptvUrl = el('input', { type: 'url', value: IPTV_DEFAULT });
     const iptvSearch = el('input', { type: 'search', placeholder: 'Filter channels…' });
@@ -927,6 +978,17 @@
           restoreRelay
         )
       ),
+      el('div',{className:'bcn-section'},
+        el('h3',{text:'Up Next · Queue Cleanup'}),
+        queueStatus,
+        el('div',{className:'bcn-row'},
+          el('button',{className:'bcn-primary',type:'button',text:'Clear upcoming (keep playing)',onclick:()=>queueAction('upcoming')}),
+          el('button',{className:'bcn-small-button',type:'button',text:'Remove blank queue rows',onclick:()=>queueAction('empty')}),
+          el('button',{className:'bcn-small-button',type:'button',text:'Clear entire queue (stops music)',onclick:()=>{
+            if(window.confirm('Stop the playing track and empty the entire cue? Audio files and your saved playlists will not be deleted.'))queueAction('all');
+          }})
+        )
+      ),
       el('div', { className: 'bcn-section' },
         el('h3', { text: 'Nova · Native AI DJ' }),
         el('label',{className:'bcn-row'},bcnUnknownToggle,
@@ -1098,6 +1160,7 @@
     ensureTalkToSpiderControl();
     ensureFloatingAutoDjControl();
     installCueClickHandler();
+    ensureQueueControls();
     syncConnectionCard();
     syncUiPolish();
   }

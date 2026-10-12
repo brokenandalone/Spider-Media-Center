@@ -141,3 +141,37 @@
 #spider-playback-error button { padding: 8px 12px; margin: 4px; border-radius: 6px; cursor: pointer; }
 #spider-playback-error button:disabled { opacity: .6; cursor: wait; }
 #spider-playback-error [hidden], #spider-playback-notice[hidden] { display: none; }
+
+/* A React-safe, document-level Up Next toolbar. Remains accessible when a
+ * React rerender replaces the queue panel's own buttons. */
+#spiderQueueToolbar {
+  position: fixed;
+  right: 18px;
+  top: 226px;
+  z-index: 2147483000;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: min(185px, calc(100vw - 36px));
+}
+#spiderQueueToolbar button {
+  cursor: pointer;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(190,118,255,.65);
+  color: #fff;
+  background: rgba(25,8,34,.96);
+  font: 800 10px/1.2 system-ui,sans-serif;
+  letter-spacing: .06em;
+  box-shadow: 0 12px 35px rgba(0,0,0,.35);
+}
+#spiderQueueToolbar button:hover,
+#spiderQueueToolbar button:focus-visible {
+  outline: 2px solid #c783ff;
+  outline-offset: 2px;
+}
+#spiderQueueToolbar button:active { transform: translateY(1px); }
+@media (max-width: 640px) {
+  #spiderQueueToolbar { top: auto; bottom: 74px; right: 10px; max-width: 156px; }
+  #spiderQueueToolbar button { font-size: 9px; padding: 9px 10px; }
+}

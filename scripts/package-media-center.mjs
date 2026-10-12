@@ -38,7 +38,7 @@ try {
     const name = path.relative(stage, file).split(path.sep).join('/');
     if (hash(extractFile(archive, name)) !== hash(fs.readFileSync(file))) throw new Error('Archive mismatch: ' + name);
   }
-  for (const name of [...runtime.map(n => 'electron/' + n), 'dist/index.html', 'dist/media-center-upgrades.js', 'dist/playlist-workshop-core.js', 'dist/playlist-workshop.js', 'dist/playlist-workshop.css', 'dist/visualizer-3d-shaders.js', 'dist/visualizer-performance.js', 'dist/visualizer-presets.js', 'dist/visualizer-3d.js', 'assets/icon-512.png', 'package.json']) {
+  for (const name of [...runtime.map(n => 'electron/' + n), 'dist/index.html', 'dist/media-center-upgrades.js', 'dist/queue-cleanup-core.js', 'dist/playlist-workshop-core.js', 'dist/playlist-workshop.js', 'dist/playlist-workshop.css', 'dist/visualizer-3d-shaders.js', 'dist/visualizer-performance.js', 'dist/visualizer-presets.js', 'dist/visualizer-3d.js', 'assets/icon-512.png', 'package.json']) {
     if (hash(extractFile(archive, name)) !== hash(fs.readFileSync(path.join(stage, name)))) throw new Error('Archive mismatch: ' + name);
   }
   const entries = listPackage(archive);
@@ -76,7 +76,8 @@ try {
       'bulk playlist selection, editing, import/export and BCN show rundown generator',
       'Australian neural Nova voices with Webbie Piper and Natasha/eSpeak recovery',
       'BCN cue rotation with a temporary Unknown Artist allowance for untagged music',
-      'missing-media library cleanup with verified snapshots and no file deletion'
+      'missing-media library cleanup with verified snapshots and no file deletion',
+      'clear upcoming music without stopping current playback, purge blank cue rows, and disable stale AutoDJ refill'
     ],
     sourceRevision: revision,
     node: process.version,

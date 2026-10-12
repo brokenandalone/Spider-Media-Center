@@ -2057,6 +2057,72 @@ function getReactPlayerSnapshot() {
  * toggleMute(), setCrossfade(seconds), cycleVisualizer()
  */
 // Expose a minimal internal engine API for an external bridge file.
+// Queue edits are separate from the music library and saved AutoDJ playlists.
+// Stop automation before removing tracks or an AutoDJ tick may refill the queue.
+function clearStoredQueue(mode = 'upcoming') {
+  const planApi = window.SpiderQueueCleanupCore;
+  if (!planApi) throw new Error('Queue cleanup is unavailable until the player finishes loading.');
+  if (state.transitioning) {
+    window.dispatchEvent(new CustomEvent('spider:notice',{detail:{message:'Finish the current crossfade before clearing tracks.'}}));
+    return {ok:false,reason:'crossfade',...window.__spiderPlayerEngine.getQueueSnapshot()};
+  }
+  if (mode === 'all' && state.radio.active) {
+    window.dispatchEvent(new CustomEvent('spider:notice',{detail:{message:'Stop BCN broadcasting before clearing the playing track and the whole queue.'}}));
+    return {ok:false,reason:'broadcast-active',...window.__spiderPlayerEngine.getQueueSnapshot()};
+  }
+  const before = state.queue.length;
+  const plan = mode === 'all'
+    ? planApi.clearAll(state.queue)
+    : mode === 'empty'
+      ? planApi.removeEmptyRows(state.queue,state.currentIndex)
+      : planApi.clearUpcoming(state.queue,state.currentIndex);
+  const removed = plan.removed;
+  // Even when the queue is already empty, stop stale AutoDJ automation
+  // to prevent the ghost entry returning immediately after a clear.
+  // AutoDJ can reconstruct a deleted "blank" track from its previous queue
+  // rotation; explicitly disarm it before mutating queue persistence.
+  try { window.__spiderAutoDJ?.stop?.(); }
+  catch (error) { console.warn('Could not stop AutoDJ during queue clear:',error); }
+  if (window.__spiderAutoDJ?.__bcnCueSession) window.__spiderAutoDJ.__bcnCueSession.tracks = [];
+  if (!removed) return {ok:true,removed:0,keptCurrent:plan.keptCurrent,...window.__spiderPlayerEngine.getQueueSnapshot()};
+  const previous = currentItem();
+  state.queue = [...plan.queue];
+  state.currentIndex = plan.currentIndex;
+  state.repeat = 'off';
+  state.aiDj.pendingBreak = null;
+  state.aiDj.endingNotifiedFor = '';
+  state.crossfadeTriggered = false;
+  const keptCurrent = plan.keptCurrent && currentItem() === previous;
+  if (!keptCurrent) {
+    decks.forEach(deck => {
+      try { deck?.pause(); deck?.removeAttribute('src'); deck?.load(); deck?.classList.remove('active'); }
+      catch (error) { console.warn('Queue clear deck reset failed:',error); }
+    });
+    if (!IS_REACT_UI) {
+      $('#emptyState')?.classList.remove('hidden');
+      if ($('#playButton')) $('#playButton').textContent='▶';
+      if ($('#seek')) $('#seek').value='0';
+      if ($('#elapsed')) $('#elapsed').textContent='0:00';
+      if ($('#duration')) $('#duration').textContent='0:00';
+    }
+  } else {
+    // The standby deck may still be primed with a removed next song.
+    const standby = decks[1 - state.activeDeck];
+    if (standby && standby !== activeMedia()) {
+      try { standby.pause(); standby.removeAttribute('src'); standby.load(); }
+      catch (error) { console.warn('Standby deck cleanup failed:',error); }
+    }
+  }
+  saveState();
+  updateNowPlaying();
+  renderQueue();
+  const snapshot = window.__spiderPlayerEngine.getQueueSnapshot();
+  emitPlayerEvent('queueChanged', snapshot);
+  window.dispatchEvent(new CustomEvent('spider:queue-cleared',
+    {detail:{removed,keptCurrent,mode,from:before,remaining:state.queue.length}}));
+  return {ok:true,removed,keptCurrent,...snapshot};
+}
+
 window.__spiderPlayerEngine = {
   getSnapshot: getReactPlayerSnapshot,
   getAIDJSnapshot: () => {
@@ -2249,14 +2315,9 @@ window.__spiderPlayerEngine = {
     return window.__spiderPlayerEngine.getQueueSnapshot();
   },
   addMedia: async () => { await addMedia(); return getReactPlayerSnapshot(); },
-  clearQueue: () => {
-    decks.forEach((deck) => { deck.pause(); deck.removeAttribute('src'); deck.load(); });
-    state.queue = [];
-    state.currentIndex = -1;
-    saveState();
-    emitPlayerEvent('queueChanged', window.__spiderPlayerEngine.getQueueSnapshot());
-    return window.__spiderPlayerEngine.getQueueSnapshot();
-  },
+  clearUpcomingQueue: () => clearStoredQueue('upcoming'),
+  removeEmptyQueueRows: () => clearStoredQueue('empty'),
+  clearQueue: () => clearStoredQueue('all'),
   togglePlay: async () => { await togglePlay(); return getReactPlayerSnapshot(); },
   previous: () => { advance(-1, false); return getReactPlayerSnapshot(); },
   next: () => { advance(1, false); return getReactPlayerSnapshot(); },
@@ -3463,18 +3524,7 @@ if (!IS_REACT_UI) {
     renderQueue();
   };
 
-  $('#clearQueueButton').onclick = () => {
-    decks.forEach((deck) => { deck.pause(); deck.removeAttribute('src'); deck.load(); deck.classList.remove('active'); });
-    state.queue = [];
-    state.currentIndex = -1;
-    $('#emptyState').classList.remove('hidden');
-    $('#seek').value = '0';
-    $('#elapsed').textContent = '0:00';
-    $('#duration').textContent = '0:00';
-    $('#playButton').textContent = '▶';
-    updateNowPlaying();
-    renderQueue();
-  };
+  $('#clearQueueButton').onclick = () => window.__spiderPlayerEngine.clearQueue();
 
   $('#partyToggle').onchange = (event) => { void setPartyEnabled(event.target.checked); };
   for (const control of [$('#partyPin'), $('#partyRequestLimit'), $('#partyVoting')]) {
@@ -3688,18 +3738,7 @@ $('#queueList').onclick = (event) => {
   renderQueue();
 };
 
-$('#clearQueueButton').onclick = () => {
-  decks.forEach((deck) => { deck.pause(); deck.removeAttribute('src'); deck.load(); deck.classList.remove('active'); });
-  state.queue = [];
-  state.currentIndex = -1;
-  $('#emptyState').classList.remove('hidden');
-  $('#seek').value = '0';
-  $('#elapsed').textContent = '0:00';
-  $('#duration').textContent = '0:00';
-  $('#playButton').textContent = '▶';
-  updateNowPlaying();
-  renderQueue();
-};
+$('#clearQueueButton').onclick = () => window.__spiderPlayerEngine.clearQueue();
 
 $('#partyToggle').onchange = (event) => { void setPartyEnabled(event.target.checked); };
 for (const control of [$('#partyPin'), $('#partyRequestLimit'), $('#partyVoting')]) {

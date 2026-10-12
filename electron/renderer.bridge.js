@@ -20,6 +20,8 @@ window.__spiderPlayerBridge = {
   enqueue(item, playNow = false) { return engine.enqueue ? engine.enqueue(item, !!playNow) : Promise.reject(new Error('no engine enqueue')) },
   enqueueMany(items, playFirst = false) { return engine.enqueueMany ? engine.enqueueMany(items, !!playFirst) : Promise.reject(new Error('no engine enqueueMany')) },
   addMedia() { return engine.addMedia(); },
+  clearUpcomingQueue() { return engine.clearUpcomingQueue ? engine.clearUpcomingQueue() : {ok:false,error:'Current player does not support queue cleanup'}; },
+  removeEmptyQueueRows() { return engine.removeEmptyQueueRows ? engine.removeEmptyQueueRows() : {ok:false,error:'Current player does not support queue cleanup'}; },
   clearQueue() { return engine.clearQueue(); },
   togglePlay() { return engine.togglePlay(); },
   previous() { return engine.previous(); },

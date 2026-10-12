@@ -2156,6 +2156,26 @@ window.__spiderPlayerEngine = {
     return getRadioStateSnapshot();
   },
   getRadioState: getRadioStateSnapshot,
+  removeInvalidStoredMedia: (records = []) => {
+    if (state.radio.active || window.__spiderAutoDJ?.isRunning?.()) throw new Error('Stop BCN and AutoDJ before cleaning the music library.');
+    if (activeMedia() && !activeMedia().paused) throw new Error('Pause playback before cleaning stored music.');
+    if (!Array.isArray(records) || records.length > 12000) throw new Error('Invalid cleanup selection.');
+    const keys = new Set(records.map(item => {
+      const url=String(item?.url||'').trim();
+      return url ? 'url:'+url : 'id:'+String(item?.id||'');
+    }).filter(key=>key!=='id:'));
+    if (!keys.size) return window.__spiderPlayerEngine.getQueueSnapshot();
+    const match = item => keys.has(item.url ? 'url:'+String(item.url).trim() : 'id:'+String(item.id||''));
+    const current=state.queue[state.currentIndex];
+    state.library=state.library.filter(item=>!match(item));
+    state.queue=state.queue.filter(item=>!match(item));
+    state.currentIndex=current ? state.queue.indexOf(current) : -1;
+    saveState();
+    renderQueue();
+    updateNowPlaying();
+    emitPlayerEvent('queueChanged', window.__spiderPlayerEngine.getQueueSnapshot());
+    return window.__spiderPlayerEngine.getQueueSnapshot();
+  },
   removeLibraryEntries: (ids = []) => {
     const removeSet = new Set(Array.isArray(ids) ? ids.filter(Boolean) : [])
     if (!removeSet.size) return window.__spiderPlayerEngine.getLibrarySnapshot()

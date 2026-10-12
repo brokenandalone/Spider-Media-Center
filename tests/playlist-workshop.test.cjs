@@ -3,7 +3,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
-const {dedupe,bulkAdd,search,createShow,move,m3u,rundownText}=require('../dist/playlist-workshop-core.js');
+const {dedupe,bulkAdd,search,createShow,move,m3u,rundownText,BCN_ARTISTS,isBcnArtist}=require('../dist/playlist-workshop-core.js');
 const songs=Array.from({length:120},(_,i)=>({id:'song-'+i,title:'BCN Track '+i,artist:'Band '+i%13,extension:'mp3',duration:220+i%15,url:'file:///media/track-'+i+'.mp3'}));
 test('bulk playlist operation adds 120 tracks without duplicated additions',()=>{
   const p={id:1,name:'BCN',tracks:songs.slice(0,5)};
@@ -63,4 +63,30 @@ test('both UI entrypoints link core before controller and preserve visualizers',
     assert.ok(html.indexOf('playlist-workshop.js')>html.indexOf('playlist-workshop-core.js'));
     assert.match(html,/visualizer-3d\.js/);
   }
+});
+
+test('BCN owns exactly four artists, including J-Cold, without a genre or outside-artist fallback',()=>{
+  assert.deepEqual(BCN_ARTISTS,['Broken Sorrow','Therapy and Sonz','Justin Therapy','J-Cold']);
+  for(const artist of BCN_ARTISTS)assert.equal(isBcnArtist(artist),true);
+  assert.equal(isBcnArtist('j–cold'),true);
+  assert.equal(isBcnArtist('J Cold'),true);
+  assert.equal(isBcnArtist('J-Cold featuring Outside Artist'),false);
+  assert.equal(isBcnArtist('Other Music'),false);
+  const allowed=BCN_ARTISTS.flatMap((artist,index)=>Array.from({length:8},(_,i)=>({
+    artist,title:artist+' #'+i,extension:'mp3',duration:210+i*3,url:'file:///approved-'+index+'-'+i+'.mp3'
+  })));
+  const mixed=[...allowed,...songs];
+  const show=createShow({name:'BCN Approved',library:mixed,durationMinutes:60,seed:'artists-only',bcnOnly:true});
+  assert.ok(show.tracks.length>5);
+  assert.ok(show.tracks.some(t=>t.artist==='J-Cold'));
+  assert.ok(show.tracks.every(t=>BCN_ARTISTS.includes(t.artist)));
+  assert.ok(show.rundown.filter(t=>t.type==='music').every(t=>BCN_ARTISTS.includes(t.artist)));
+  assert.equal(createShow({library:songs,bcnOnly:true}).count,0);
+  assert.match(createShow({library:songs,bcnOnly:true}).warning,/J-Cold/);
+  assert.ok(createShow({library:songs,bcnOnly:false}).count>0,'Private library rotation stays unrestricted');
+});
+test('BCN show UI always activates four-artist filtering',()=>{
+  const src=fs.readFileSync(path.join(__dirname,'..','dist','playlist-workshop.js'),'utf8');
+  assert.match(src,/library:tracks,bcnOnly:true/);
+  for(const artist of BCN_ARTISTS)assert.ok(src.includes(artist));
 });

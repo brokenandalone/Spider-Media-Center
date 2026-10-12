@@ -4,7 +4,7 @@
 set -Eeuo pipefail
 umask 077
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-NOVA_OS_COMMIT='b0099290f9618b47a22342b43ca25bb856852a9e'
+NOVA_OS_COMMIT='d66eeebc06a2d2546a7f906ab38311170b2bf736'
 NOVA_OS_REPO='brokenandalone/spider-narive-os'
 NOVA_TARGET='/usr/local/lib/spider-os/media/ai-dj'
 MEDIA_TARGET='/opt/spider-media-center/resources/app.asar'

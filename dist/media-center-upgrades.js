@@ -35,6 +35,11 @@
         throw new Error('Song changed before Nova completed the DJ break');
       }
       window.__spiderLastDjTalkOver = result.talkOver || null;
+      window.dispatchEvent(new CustomEvent('spider:nova-voice-used',{
+        detail:{engine:result.voiceEngine||'unverified',
+          requested:result.voiceProfileRequested||request.context.voiceProfile,
+          fallback:result.voiceFallback===true}
+      }));
       return new Response(JSON.stringify(result), {
         status: 200, headers: { 'Content-Type': 'application/json' }
       });
@@ -781,14 +786,26 @@
       novaStatus.textContent='Nova voice set to '+novaVoice.options[novaVoice.selectedIndex].text+'. Changes apply to the next DJ break.';
     });
     const novaVoiceAvailability=el('p',{className:'bcn-muted',text:'Voice availability is checked through the native Nova service.'});
+    const novaRealVoice=el('p',{className:'bcn-muted',text:'Last on-air neural voice: not verified yet. No robotic fallback is permitted in the new native Nova service.'});
+    window.addEventListener('spider:nova-voice-used',event=>{
+      const item=event.detail||{};
+      novaRealVoice.textContent='Last Nova break: '+String(item.engine||'unknown')+
+        (item.fallback?' (fallback from '+String(item.requested||'selected voice')+')':'')+
+        '. This confirms what produced the audio, not merely the selected option.';
+    });
     const refreshNovaVoices=async()=>{
       try{
         const result=await window.spider.novaVoices();
         novaVoiceAvailability.textContent=result.piperReady
-          ?'Webbie Australian Piper voices are ready. Available: '+result.voices.join(', ')+'.'
-          :'Australian Piper voice model is not installed for this user. Nova can fall back to Natasha or eSpeak.';
+          ?'Webbie Australian Piper model found. Available profiles: '+result.voices.join(', ')+'.'
+          :'Australian Piper model is missing or not executable for this user. Check Webbie voice installation. Natasha may work online.';
+        novaRealVoice.textContent=result.lastVoice?.error
+          ?'Neural synthesis failed: '+result.lastVoice.error+'. Music continues; robot voice is not used.'
+          :'Last voice: '+(result.lastVoice?.engine||'none yet')+
+            (result.lastVoice?.usedFallback?' (used neural fallback)':'')+
+            (result.robotVoiceAllowed?' WARNING: old Nova service still allows robotic backup.':' · robotic fallback disabled.');
       }catch{
-        novaVoiceAvailability.textContent='Native Nova voice update not installed yet. Existing Natasha/eSpeak continues working.';
+        novaVoiceAvailability.textContent='Could not query native Nova voices. Confirm the paired Nova update is installed and service is running.';
       }
     };
     const refreshNova = async () => {
@@ -1042,7 +1059,8 @@
         novaStatus,
         el('div',{className:'bcn-row'},novaVoice,checkNova),
         novaVoiceAvailability,
-        el('button',{type:'button',className:'bcn-small-button',text:'Check Australian voices',onclick:refreshNovaVoices})
+        novaRealVoice,
+        el('button',{type:'button',className:'bcn-small-button',text:'Check actual voice engine',onclick:refreshNovaVoices})
       ),
       el('div', { className: 'bcn-section' },
         el('h3', { text: 'BCN Continuity Guard' }),

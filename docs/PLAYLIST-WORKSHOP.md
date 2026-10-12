@@ -8,6 +8,12 @@ Open Spider Media Center and click **PLAYLIST WORKSHOP** at the upper left. Sear
 
 Use **Append to queue** to add the full playlist without interrupting playback. **Replace queue** requires confirmation and refuses to replace the current queue while radio is live. Neither action starts broadcasting or starts AutoDJ. Deleting a playlist never deletes music files.
 
+## BCN Radio approved artist lineup
+
+BCN show generator music is restricted to these four artist credits: **Broken Sorrow**, **Therapy and Sonz**, **Justin Therapy**, and **J-Cold**. The generator excludes other artists and songs with missing or nonmatching artist metadata rather than silently substituting unrelated material. Match is case-insensitive and tolerant of J-Cold dash/spacing differences.
+
+This rule applies to **new BCN show playlists created by the Workshop**. The general Media Center's personal playback, manual playlists, previously saved AutoDJ playlists, and live stream transport are not retroactively filtered. Inspect existing AutoDJ playlists before using them for BCN. Mislabeled media should be retagged rather than assumed to be approved based on filename or genre.
+
 ## Show playlist generation
 
 Enter a show name, length, optional music-theme filter, music source, music tracks between planned Nova cue points, estimated song runtime and repeat policy. Click **Generate show** for a deterministic preview, then **Save to AutoDJ playlists** to save the music as an existing AutoDJ playlist. A separate text rundown contains opening, Nova DJ break, and closing cues. The cues are planning notes: not generated voice files, live interstitials, or scheduled radio automation. For schedule assignment use the existing AutoDJ show scheduler separately.

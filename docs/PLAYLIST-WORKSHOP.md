@@ -10,7 +10,11 @@ Use **Append to queue** to add the full playlist without interrupting playback. 
 
 ## BCN Radio approved artist lineup
 
-BCN show generator music is restricted to these four artist credits: **Broken Sorrow**, **Therapy and Sonz**, **Justin Therapy**, and **J-Cold**. The generator excludes other artists and songs with missing or nonmatching artist metadata rather than silently substituting unrelated material. Match is case-insensitive and tolerant of J-Cold dash/spacing differences.
+BCN keeps four permanent named artist credits: **Broken Sorrow**, **Therapy and Sonz**, **Justin Therapy**, and **J-Cold**. A separate **temporary Unknown Artist allowance** is enabled by default for the owner's not-yet-tagged library: it accepts either the literal `Unknown Artist` credit (case-insensitive) or an empty/missing artist field. This is essential because the native media importer actually records untagged artist metadata as the empty string even when the UI renders an `Unknown Artist` label. The allowance does not automatically accept unrelated **named** artists. J-Cold matching still tolerates dash/spacing differences.
+
+In BCN MEDIA > Nova and PLAYLIST WORKSHOP > BCN Show Generator, the **Temporarily allow Unknown Artist / untagged songs** checkbox controls the shared allowance. When the music has been properly tagged, **turn it off** to return to strict four-artist filtering; the switch does not rewrite any metadata. A switch change affects the next cue selection or newly generated show, but already saved show playlists should be reviewed or regenerated.
+
+**Important:** Unknown Artist is not an identity or a licensing check. While the switch is on, *any* otherwise eligible untagged song can enter a BCN cue or new show. Review the queue and confirm music distribution/broadcast rights before going live. The personal Media Center library remains unrestricted.
 
 This rule applies to **new BCN show playlists created by the Workshop**. The general Media Center's personal playback, manual playlists, previously saved AutoDJ playlists, and live stream transport are not retroactively filtered. Inspect existing AutoDJ playlists before using them for BCN. Mislabeled media should be retagged rather than assumed to be approved based on filename or genre.
 
@@ -36,7 +40,7 @@ The paired installer updates `service.py`, `nova_host.py`, and `nova_voice.py` f
 
 ## Nova plays from the cue when there is no selected playlist
 
-Click **Start AutoDJ** after putting approved songs in the player queue. If no show playlist has been explicitly started, the button starts a **session-only BCN Live Cue** rotation from the existing queue without creating/saving a playlist. Its available tracks update when the queue changes. Only Broken Sorrow, Therapy and Sonz, Justin Therapy, and J-Cold are eligible. Incorrectly tagged or non-BCN music is never chosen. Stop AutoDJ to end cue rotation. Existing directly selected playlists and programmed show scheduling remain independent. This feature never starts the public broadcaster, adds downloaded tracks, or grants stream rights.
+Click **Start AutoDJ** after putting approved songs in the player queue. If no show playlist has been explicitly started, the button starts a **session-only BCN Live Cue** rotation from the existing queue without creating/saving a playlist. Its available tracks update when the queue changes. Only the four permanent named artists or temporarily allowed Unknown Artist/blank-tag entries are eligible. Other named artists are not chosen. The temporary allowance can admit music you did not intend to broadcast, so check the queue carefully. Stop AutoDJ to end cue rotation. Existing directly selected playlists and programmed show scheduling remain independent. This feature never starts the public broadcaster, adds downloaded tracks, or grants stream rights.
 
 ## Verification and install guardrails
 

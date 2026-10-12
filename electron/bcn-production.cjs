@@ -31,7 +31,8 @@ class BcnProductionLibrary{
     try {
       const data=JSON.parse(fs.readFileSync(this.index,'utf8'));
       return (Array.isArray(data.items)?data.items:[])
-        .filter(x=>x&&/^[0-9a-f-]{36}$/.test(x.id))
+        .filter(x=>x && /^[0-9a-f-]{36}$/.test(x.id) &&
+          (x.filename===x.id+'.wav' || x.filename===x.id+'.mp3'))
         .map(x=>({...x}));
     }catch(e){if(e.code==='ENOENT')return [];throw e;}
   }

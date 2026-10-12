@@ -12,14 +12,18 @@ const workflow=fs.readFileSync(path.join(root,'.github/workflows/validate.yml'),
 test('single combined installer bundles V7 preview and pinned existing V6 Nova',()=>{
  assert.match(combined,/install-v7-preview\.sh" --check/);
  assert.match(combined,/install-v7-preview\.sh" --install/);
- assert.match(combined,/NOVA_OS_COMMIT='e9b13a65c26eb4975aebce13177f84c9190efb48'/);
+ assert.match(combined,/NOVA_OS_COMMIT='b0099290f9618b47a22342b43ca25bb856852a9e'/);
  assert.match(combined,/systemctl --user restart spider-ai-dj\.service/);
+ assert.match(combined,/for filename in nova_host\.py nova_voice\.py service\.py/);
+ assert.match(combined,/\/dj\/voices/);
  assert.match(combined,/health\.get\('host'\)=='Nova'/);
  assert.doesNotMatch(combined,/apt-get|systemctl enable|curl.*latest/);
 });
 test('backup and rollback are paired, original V6 pin remains intact',()=>{
  assert.match(combined,/MEDIA_BACKUP=/);
  assert.match(combined,/NOVA_BACKUP=/);
+ assert.match(combined,/HAD_VOICE=/);
+ assert.match(combined,/NOVA_BACKUP\/nova_voice\.py/);
  assert.match(combined,/rollback\(\)/);
  assert.match(combined,/trap on_exit EXIT/);
  assert.match(combined,/sudo cmp -s/);
@@ -54,6 +58,6 @@ test('corrected Nova is exercised through real HTTP before any backup or file re
  assert.match(combined,/opener\.open\(url\+'\/health'/);
  assert.match(combined,/method='OPTIONS'/);
  assert.match(combined,/Nova HTTP preflight passed/);
- assert.match(combined,/NOVA_OS_COMMIT='e9b13a65c26eb4975aebce13177f84c9190efb48'/);
+ assert.match(combined,/NOVA_OS_COMMIT='b0099290f9618b47a22342b43ca25bb856852a9e'/);
  assert.doesNotMatch(combined,/NOVA_OS_COMMIT='980fccf98e4dfdfdb27b32a49c46158ca752a79c'/);
 });

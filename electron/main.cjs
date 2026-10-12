@@ -26,6 +26,7 @@ const { nativeNova } = require('./nova-service.cjs');
 const { audit: auditStoredMedia } = require('./music-library-audit.cjs');
 const nova = nativeNova();
 const { BcnDesk } = require('./bcn-desk.cjs');
+const { BcnProductionLibrary } = require('./bcn-production.cjs');
 const { NovaPrepareQueue } = require('./bcn-prepare-queue.cjs');
 const { BcnListenerIntake } = require('./bcn-listener-intake.cjs');
 const { RadioTelemetry } = require('./radio-telemetry.cjs');
@@ -35,6 +36,10 @@ const novaPrepareQueue = new NovaPrepareQueue(8);
 let bcnDesk;
 function programmingDesk() {
   return bcnDesk ||= new BcnDesk({ file: path.join(app.getPath('userData'), 'bcn-desk.json') });
+}
+let bcnProduction;
+function productionLibrary() {
+  return bcnProduction ||= new BcnProductionLibrary(path.join(app.getPath('userData'),'bcn-production'));
 }
 function trustedMediaSender(event) {
   if (!mainWindow || event.sender !== mainWindow.webContents) {
@@ -1289,6 +1294,27 @@ ipcMain.handle('bcn:desk-add-request', (event, value) => {
 ipcMain.handle('bcn:desk-review-request', (event, id, approved) => {
   trustedMediaSender(event);
   return programmingDesk().reviewRequest(id, approved === true);
+});
+ipcMain.handle('nova:production-draft',(event,values)=>{
+  trustedMediaSender(event);
+  return nova.draftProduction(values);
+});
+ipcMain.handle('nova:production-voice',(event,values)=>{
+  trustedMediaSender(event);
+  return novaPrepareQueue.enqueue(()=>nova.produceApproved(values));
+});
+ipcMain.handle('bcn:production-list',(event)=>{
+  trustedMediaSender(event);
+  return productionLibrary().records();
+});
+ipcMain.handle('bcn:production-save',(event,values)=>{
+  trustedMediaSender(event);
+  return productionLibrary().save(values);
+});
+ipcMain.handle('bcn:production-remove',(event,id)=>{
+  trustedMediaSender(event);
+  if(radioState.active===true)throw Error('Stop BCN broadcasting before removing a saved production');
+  return productionLibrary().remove(id);
 });
 ipcMain.handle('nova:prepare', (event, payload) => {
   trustedMediaSender(event);

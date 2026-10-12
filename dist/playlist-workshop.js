@@ -147,6 +147,87 @@
    saveShow(p.id,result);refreshPlaylists();
    notify('Saved '+result.name+' as an AutoDJ playlist. Cues are saved in its rundown, never in the audio queue.');
  }
+
+ async function scanInvalidMusic(){
+   ready();
+   if(bridge()?.getRadioState?.()?.active)throw Error('Stop BCN broadcasting before cleaning stored media.');
+   const indexed=bridge().getLibrarySnapshot?.()?.library||[];
+   const queueItems=bridge().getQueueSnapshot?.()?.queue||[];
+   const saved=playlists();
+   const combined=[...indexed,...queueItems,...saved.flatMap(p=>p.tracks||[])];
+   const report=await window.spider.auditStoredMedia(combined);
+   state.audit={report,combined,indexed,queueItems,saved};
+   const status=$('pw-audit-status'),list=$('pw-audit-preview');
+   list.replaceChildren();
+   status.textContent=report.invalid.length+' invalid stored references; '+report.valid+' valid, '+report.unknown+' unverifiable, '+report.skipped+' streams/network items not checked. Missing files on disconnected drives may be restored by reconnecting them.';
+   for(const item of report.invalid.slice(0,80)){
+     const track=combined[item.index];
+     list.append(dom('div','pw-rundown-row',(track?.artist?track.artist+' / ':'')+(track?.title||track?.url||'Unnamed')+' · '+item.reason));
+   }
+   if(report.invalid.length>80)list.append(dom('small','pw-muted','Showing first 80 broken references. All '+report.invalid.length+' are included in cleanup.'));
+   $('pw-remove-invalid').disabled=!report.invalid.length;
+   notify('Audit finished. Review invalid entries before clearing stored records.');
+ }
+ async function removeInvalidMusic(){
+   const snapshot=state.audit;
+   if(!snapshot?.report.invalid.length)throw Error('Run Scan invalid entries first.');
+   if(dj()?.isRunning?.())throw Error('Stop AutoDJ before clearing stored entries.');
+   if(bridge()?.getRadioState?.()?.active)throw Error('Stop BCN broadcasting before clearing stored entries.');
+   const before=bridge().getLibrarySnapshot?.()?.library||[];
+   const currentQueue=bridge().getQueueSnapshot?.()?.queue||[];
+   const currentSaved=playlists();
+   const combined=[...before,...currentQueue,...currentSaved.flatMap(p=>p.tracks||[])];
+   // Do not act on a stale preview after the library or playlists have changed.
+   if(combined.length!==snapshot.combined.length ||
+      combined.some((track,i)=>String(track?.url||'')!==String(snapshot.combined[i]?.url||'')))
+     throw Error('Your library or playlists changed. Scan again before clearing.');
+   const fresh=await window.spider.auditStoredMedia(combined);
+   const prior=snapshot.report.invalid.map(x=>x.index).join(',');
+   if(fresh.invalid.map(x=>x.index).join(',')!==prior)
+     throw Error('File availability changed. Scan again before clearing.');
+   const count=fresh.invalid.length;
+   const cleanPlaylists=$('pw-clean-playlists').checked;
+   if(!window.confirm('Remove '+count+' broken saved references from the indexed library and queue'+
+      (cleanPlaylists?' AND remove broken song entries from AutoDJ playlists':'')+
+      '? This does NOT delete any audio files. A recovery backup is created first.'))return;
+   const rawState=localStorage.getItem('spider-player-state-v2');
+   const backup=await window.spider.backupStoredMedia({
+     library:before,queue:currentQueue,playlists:currentSaved,
+     showRundowns:savedShows(),rawState
+   });
+   if(!backup?.ok||!backup.backupFile)throw Error('Backup failed. Nothing was removed.');
+   // All entries have been verified by the native filesystem audit.
+   const invalidKeys=new Set(fresh.invalid.map(entry=>{
+     const track=combined[entry.index];return String(track?.url||'').trim()
+       ? 'url:'+String(track.url).trim():'id:'+String(track?.id||'');
+   }));
+   const isInvalid=track=>invalidKeys.has(track?.url?'url:'+String(track.url).trim():'id:'+String(track?.id||''));
+   const records=fresh.invalid.map(entry=>combined[entry.index]);
+   if(cleanPlaylists){
+     for(const p of currentSaved){
+       const good=(p.tracks||[]).filter(t=>!isInvalid(t));
+       if(good.length!==(p.tracks||[]).length){
+         dj().savePlaylist({...p,tracks:good});
+         const shows=savedShows();
+         if(shows[String(p.id)]){
+           const show=shows[String(p.id)];
+           saveShow(p.id,{...show,tracks:good,
+             rundown:(show.rundown||[]).filter(line=>line.type!=='music'||!isInvalid(line)),
+             count:good.length,complete:false,
+             warning:'Music entries changed. Regenerate this show for accurate timings.'});
+         }
+       }
+     }
+   }
+   bridge().removeInvalidStoredMedia(records);
+   state.audit=null;state.chosen.clear();
+   $('pw-audit-preview').replaceChildren();
+   $('pw-remove-invalid').disabled=true;
+   $('pw-audit-status').textContent=count+' broken stored references cleared. Recovery backup: '+backup.backupFile+
+       '. Audio files were not deleted. Unverifiable/network items were untouched.';
+   refreshPlaylists();renderLibrary();
+   notify('Invalid music references cleared. Recovery backup saved before any changes.');
+ }
  function startup(){
    if($('pw-launcher'))return;
    const panel=dom('section','pw-panel');panel.id='pw-panel';panel.hidden=true;panel.setAttribute('role','dialog');panel.setAttribute('aria-label','Playlist Workshop');
@@ -215,6 +296,17 @@
        btn('Export draft rundown',()=>state.draft?download(Core.rundownText(state.draft),state.draft.name+'-rundown.txt'):notify('Generate a show first.',true)),
        btn('Append draft music to queue',()=>state.draft&&queue(state.draft.tracks).catch(e=>notify(e.message,true)))),lines);
    panel.append(generator);
+   const cleaner=dom('section','pw-card pw-generator');
+   cleaner.append(dom('h3','','4. Music Library Cleanup'),
+      dom('p','pw-muted','Scan missing, empty, or malformed local media records. Network streams and files that cannot be verified stay untouched. Nothing here deletes actual files. Reconnect removable drives before cleaning.'));
+   const cleanPlaylists=input('checkbox');cleanPlaylists.id='pw-clean-playlists';cleanPlaylists.checked=true;
+   const auditStatus=dom('p','pw-muted','No scan run. Close any live BCN broadcast before scanning.');auditStatus.id='pw-audit-status';
+   const auditPreview=dom('div','pw-rundown');auditPreview.id='pw-audit-preview';
+   const clear=btn('Clear invalid stored entries',()=>removeInvalidMusic().catch(e=>notify(e.message,true)),'pw-warn');
+   clear.id='pw-remove-invalid';clear.disabled=true;
+   cleaner.append(row(btn('Scan invalid entries',()=>scanInvalidMusic().catch(e=>notify(e.message,true)),'pw-emphasis'),
+      field('Also clean broken entries from saved playlists',cleanPlaylists),clear),auditStatus,auditPreview);
+   panel.append(cleaner);
    document.body.append(launch,panel);
    document.addEventListener('keydown',event=>{if(event.key==='Escape')panel.hidden=true;});
    window.SpiderPlaylistWorkshop=Object.freeze({open:()=>launch.click(),generate:o=>Core.createShow(o)});

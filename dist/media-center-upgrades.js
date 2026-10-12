@@ -1032,7 +1032,8 @@
       recordedProduction=null;
       if(previewAudio){try{previewAudio.pause();}catch{}previewAudio=null;}
     };
-    for(const node of [productionScript,productionType,productionSponsor,productionTitle,productionShow]){
+    for(const node of [productionScript,productionType,productionSponsor,productionTitle,
+      productionShow,productionFacts,productionBrief,novaVoice]){
       node.addEventListener('input',()=>{resetRecording();productionApproved.checked=false;});
       node.addEventListener('change',()=>{resetRecording();productionApproved.checked=false;});
     }
